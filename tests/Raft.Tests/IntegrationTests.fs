@@ -79,3 +79,65 @@ let ``Integration: 3 nodes elect leader and commit command`` () =
     s2 <- s2_final
 
     Assert.Equal(1L, s2.Volatile.CommitIndex)
+
+[<Fact>]
+let ``Integration: leader down causes new election and leader change`` () =
+    let config1 =
+        { NodeId = 1
+          Host = ""
+          Port = 0
+          Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
+          ElectionTimeoutMinMs = 1
+          ElectionTimeoutMaxMs = 2
+          HeartbeatIntervalMs = 1 }
+
+    let config2 =
+        { config1 with
+            NodeId = 2
+            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ] }
+
+    let config3 =
+        { config1 with
+            NodeId = 3
+            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 2; Host = ""; Port = 0 } ] }
+
+    let mutable s1 = State.init config1 None
+    let mutable s2 = State.init config2 None
+    let mutable s3 = State.init config3 None
+
+    // 1. Initial election: Node 1 becomes leader
+    s1 <- Election.startElection s1
+    let rv1 = Election.createRequestVote s1
+
+    let s2_new, resp2 = Election.handleRequestVote rv1 s2
+    s2 <- s2_new
+    let s3_new, resp3 = Election.handleRequestVote rv1 s3
+    s3 <- s3_new
+
+    s1 <- Election.handleVoteResponse 2 resp2 s1
+    s1 <- Election.handleVoteResponse 3 resp3 s1
+
+    Assert.Equal(Leader, s1.Role)
+    Assert.Equal(1L, s1.Persistent.CurrentTerm)
+
+    // 2. Leader (Node 1) goes down (stops sending heartbeats).
+    // Node 2 times out and starts a new election.
+    s2 <- Election.startElection s2
+    Assert.Equal(Candidate, s2.Role)
+    Assert.Equal(2L, s2.Persistent.CurrentTerm)
+
+    let rv2 = Election.createRequestVote s2
+
+    // 3. Node 3 receives RequestVote from Node 2
+    let s3_newer, resp3_2 = Election.handleRequestVote rv2 s3
+    s3 <- s3_newer
+
+    Assert.True resp3_2.VoteGranted
+    Assert.Equal(2L, s3.Persistent.CurrentTerm)
+
+    // 4. Node 2 receives response from Node 3 and becomes new leader
+    s2 <- Election.handleVoteResponse 3 resp3_2 s2
+
+    Assert.Equal(Leader, s2.Role)
+    Assert.True s2.LeaderState.IsSome
+    Assert.Equal(2L, s2.Persistent.CurrentTerm)

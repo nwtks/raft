@@ -3,7 +3,6 @@
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <IsPackable>false</IsPackable>
-    <IncludeTestAssembly>true</IncludeTestAssembly>
   </PropertyGroup>
 
   <ItemGroup>
