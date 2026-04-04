@@ -26,10 +26,8 @@ module Node =
           ElectionTimer: Timer option
           HeartbeatTimer: Timer option }
 
-    let rand = System.Random()
-
     let getRandomElectionTimeout (config: NodeConfig) =
-        rand.Next(config.ElectionTimeoutMinMs, config.ElectionTimeoutMaxMs)
+        System.Random.Shared.Next(config.ElectionTimeoutMinMs, config.ElectionTimeoutMaxMs)
 
     let resetTimer (inbox: MailboxProcessor<NodeMessage>) (timer: Timer option) (msg: NodeMessage) (interval: int) =
         match timer with

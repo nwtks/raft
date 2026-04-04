@@ -60,7 +60,7 @@ module Transport =
             try
                 use client = new TcpClient()
                 let connectTask = client.ConnectAsync(peer.Host, peer.Port)
-                let timeoutTask = Task.Delay 500
+                let timeoutTask = Task.Delay 3000
                 let! completed = Task.WhenAny(connectTask, timeoutTask)
 
                 if completed = connectTask && client.Connected then
