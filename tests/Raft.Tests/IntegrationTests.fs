@@ -141,3 +141,24 @@ let ``Integration: leader down causes new election and leader change`` () =
     Assert.Equal(Leader, s2.Role)
     Assert.True s2.LeaderState.IsSome
     Assert.Equal(2L, s2.Persistent.CurrentTerm)
+
+    // 5. Original Leader (Node 1) comes back online.
+    // It still thinks it is the leader of Term 1.
+    Assert.Equal(Leader, s1.Role)
+    Assert.Equal(1L, s1.Persistent.CurrentTerm)
+
+    // 6. New Leader (Node 2) sends a heartbeat to Node 1.
+    let hb_from2 = Replication.createHeartbeat 1 s2
+
+    Assert.True hb_from2.IsSome
+    Assert.Equal(2L, hb_from2.Value.LeaderTerm)
+
+    // 7. Node 1 receives the heartbeat from Node 2.
+    // Since LeaderTerm (2) > CurrentTerm (1), Node 1 must step down.
+    let s1_after_hb, resp1_ae = Replication.handleAppendEntries hb_from2.Value s1
+    s1 <- s1_after_hb
+
+    Assert.Equal(Follower, s1.Role)
+    Assert.Equal(2L, s1.Persistent.CurrentTerm)
+    Assert.Equal(Some 2, s1.CurrentLeader)
+    Assert.True resp1_ae.Success
