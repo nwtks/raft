@@ -36,19 +36,34 @@ ScaffoldingReadMe.txt
 # NuGet Symbol Packages
 *.snupkg
 
-# Others
-~$*
-*~
-CodeCoverage/
-
 # MSBuild Binary and Structured Log
 *.binlog
 
-# MSTest test Results
-[Tt]est[Rr]esult*/
-[Bb]uild[Ll]og.*
+# Test results and coverage
+TestResults/
+CodeCoverage/
+coveragereport/
+coverage.cobertura.xml
+*.trx
 
 # NUnit
 *.VisualState.xml
 TestResult.xml
 nunit-*.xml
+
+# Visual Studio / Rider / VS Code files
+.vs/
+.idea/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Others
+~$*
+*~
+.DS_Store
+*.swp
+*.tmp
+.fake

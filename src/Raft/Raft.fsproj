@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="Types.fs" />
+    <Compile Include="Log.fs" />
+    <Compile Include="State.fs" />
+    <Compile Include="Election.fs" />
+    <Compile Include="Replication.fs" />
+    <Compile Include="Node.fs" />
+    <Compile Include="Transport.fs" />
+    <Compile Include="Persistence.fs" />
+    <Compile Include="Program.fs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="FSharp.SystemTextJson" Version="1.3.13" />
+  </ItemGroup>
+
+</Project>
