@@ -1,6 +1,5 @@
 namespace Raft
 
-open System
 open System.Net
 open System.Net.Sockets
 open System.Text
@@ -51,7 +50,7 @@ module Transport =
                     }
                     |> Async.Start
             with
-            | :? ObjectDisposedException -> ()
+            | :? System.ObjectDisposedException -> ()
             | ex -> log $"Listener error: {ex.Message}"
         }
 

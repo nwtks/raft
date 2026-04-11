@@ -1,11 +1,10 @@
 module Raft.Tests.PersistenceTests
 
-open System
 open System.IO
 open Xunit
 open Raft
 
-let getTestNodeId () = Random().Next(10000, 99999)
+let getTestNodeId () = System.Random().Next(10000, 99999)
 
 [<Fact>]
 let ``Load returns None when file does not exist`` () =

@@ -43,7 +43,7 @@ ScaffoldingReadMe.txt
 TestResults/
 CodeCoverage/
 coveragereport/
-coverage.cobertura.xml
+coverage.*
 *.trx
 
 # NUnit

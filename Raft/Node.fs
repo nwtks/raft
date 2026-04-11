@@ -71,6 +71,9 @@ module Node =
 
         State.updateLastApplied lastApplied state
 
+    let resetElectionTimer (ctx: Context) =
+        resetTimer ctx.Inbox ctx.ElectionTimer ElectionTimeout (getRandomElectionTimeout ctx.Config)
+
     let receiveElectionTimeout (ctx: Context) =
         if ctx.State.Role <> Leader then
             let newState = Election.startElection ctx.State
@@ -84,21 +87,17 @@ module Node =
                 else
                     newState
 
-            let electionTimer =
-                resetTimer ctx.Inbox ctx.ElectionTimer ElectionTimeout (getRandomElectionTimeout ctx.Config)
-
-            finalState, electionTimer
+            finalState, resetElectionTimer ctx
         else
             ctx.State, ctx.ElectionTimer
+
+    let resetHeartbeatTimer (ctx: Context) =
+        resetTimer ctx.Inbox ctx.HeartbeatTimer HeartbeatTimeout ctx.Config.HeartbeatIntervalMs
 
     let receiveHeartbeatTimeout (ctx: Context) =
         if ctx.State.Role = Leader then
             broadcastAppendEntries ctx.Config ctx.Transport ctx.State
-
-            let heartbeatTimer =
-                resetTimer ctx.Inbox ctx.HeartbeatTimer HeartbeatTimeout ctx.Config.HeartbeatIntervalMs
-
-            ctx.State, heartbeatTimer
+            ctx.State, resetHeartbeatTimer ctx
         else
             ctx.State, ctx.HeartbeatTimer
 
@@ -146,25 +145,17 @@ module Node =
 
         if oldRole <> Leader && newState.Role = Leader then
             broadcastHeartbeat ctx.Config ctx.Transport newState
-
-            let heartbeatTimer =
-                resetTimer ctx.Inbox ctx.HeartbeatTimer HeartbeatTimeout ctx.Config.HeartbeatIntervalMs
-
+            let heartbeatTimer = resetHeartbeatTimer ctx
             stopTimer ctx.ElectionTimer
             let state = applyCommitted ctx.OnApply newState
             state, ctx.ElectionTimer, heartbeatTimer
         elif oldRole = Leader && newState.Role <> Leader then
             stopTimer ctx.HeartbeatTimer
-
-            let electionTimer =
-                resetTimer ctx.Inbox ctx.ElectionTimer ElectionTimeout (getRandomElectionTimeout ctx.Config)
-
+            let electionTimer = resetElectionTimer ctx
             let state = applyCommitted ctx.OnApply newState
             state, electionTimer, ctx.HeartbeatTimer
         elif sendReply then
-            let electionTimer =
-                resetTimer ctx.Inbox ctx.ElectionTimer ElectionTimeout (getRandomElectionTimeout ctx.Config)
-
+            let electionTimer = resetElectionTimer ctx
             let state = applyCommitted ctx.OnApply newState
             state, electionTimer, ctx.HeartbeatTimer
         else
@@ -212,10 +203,6 @@ type RaftNode(config: NodeConfig, transport: ITransport, persistence: IPersisten
         MailboxProcessor.Start(fun inbox ->
             let cts = new CancellationTokenSource()
             transport.StartListener config (RaftRPC >> inbox.Post) cts.Token |> ignore
-
-            let electionTimer =
-                Node.resetTimer inbox None ElectionTimeout (Node.getRandomElectionTimeout config)
-
             let loadedState = persistence.Load()
 
             let ctx: Node.Context =
@@ -225,10 +212,12 @@ type RaftNode(config: NodeConfig, transport: ITransport, persistence: IPersisten
                   OnApply = onApply
                   Inbox = inbox
                   State = State.init config loadedState
-                  ElectionTimer = electionTimer
+                  ElectionTimer = None
                   HeartbeatTimer = None }
 
-            Node.agentLoop ctx)
+            Node.agentLoop
+                { ctx with
+                    ElectionTimer = Node.resetElectionTimer ctx })
 
     member _.SubmitCommand(cmd: string) =
         agent.PostAndReply(fun ch -> RaftRPC(ClientCommand(cmd, Some ch)))

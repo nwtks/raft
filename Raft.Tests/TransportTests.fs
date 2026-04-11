@@ -1,6 +1,5 @@
 module Raft.Tests.TransportTests
 
-open System
 open System.Threading
 open System.Threading.Tasks
 open Xunit
@@ -40,7 +39,7 @@ let ``sendMessage triggers listener and receives message`` () =
 
     let msg = RequestVoteMsg reqVote
     tcpTransport.SendMessage (dummyPeer port) msg
-    let received = tcs.Task.Wait(TimeSpan.FromSeconds 5.0)
+    let received = tcs.Task.Wait(System.TimeSpan.FromSeconds 5.0)
     cts.Cancel()
     Assert.True(received, "Message was not received within timeout")
 

@@ -1,6 +1,5 @@
 namespace Raft
 
-open System
 open System.Threading
 
 module Program =
@@ -64,7 +63,7 @@ module Program =
     [<TailCall>]
     let rec inputLoop (node: RaftNode) kvs =
         printf "> "
-        let input = Console.ReadLine()
+        let input = System.Console.ReadLine()
 
         if isNull input then
             ()
@@ -112,7 +111,7 @@ module Program =
         |> Array.toList
         |> function
             | "--node" :: idStr :: _ ->
-                match Int32.TryParse idStr with
+                match System.Int32.TryParse idStr with
                 | true, id when id >= 0 && id <= 2 -> Some id
                 | _ -> None
             | _ -> None
