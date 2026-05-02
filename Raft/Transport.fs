@@ -20,7 +20,7 @@ module Transport =
         task {
             let listener = new TcpListener(IPAddress.Any, config.Port)
             listener.Start()
-            log $"Listening on port {config.Port}"
+            log $"Listening on port {config.Port}."
 
             use _reg =
                 ct.Register(fun () ->
@@ -46,12 +46,12 @@ module Transport =
                                 let msg = JsonSerializer.Deserialize<RaftMessage>(json, jsonOptions)
                                 postMessage msg
                             with ex ->
-                                log $"Error deserializing message: {ex.Message}"
+                                log $"Error deserializing message: {ex.Message}."
                     }
                     |> Async.Start
             with
             | :? System.ObjectDisposedException -> ()
-            | ex -> log $"Listener error: {ex.Message}"
+            | ex -> log $"Listener error: {ex.Message}."
         }
 
     let sendMessage (peer: PeerInfo) (msg: RaftMessage) =
@@ -67,9 +67,9 @@ module Transport =
                     use stream = client.GetStream()
                     do! stream.WriteAsync(bytes, 0, bytes.Length)
                 else
-                    log $"Timeout connecting to {peer.Id} ({peer.Host}:{peer.Port})"
+                    log $"Timeout connecting to {peer.Id} ({peer.Host}:{peer.Port})."
             with ex ->
-                log $"Failed to send to {peer.Id}: {ex.Message}"
+                log $"Failed to send to {peer.Id}: {ex.Message}."
         }
         |> ignore
 

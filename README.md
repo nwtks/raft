@@ -13,13 +13,13 @@ This project implements the core mechanics of Raft—Leader Election and Log Rep
 - **Actor Model Design:** Non-blocking, thread-safe state machine utilizing F#'s `MailboxProcessor` (`Node.fs`).
 - **TCP Transport Layer:** Custom JSON-based RPC serialization over raw TCP sockets using F# Discriminated Unions support (`Transport.fs`).
 - **Crash Recovery & Persistence:** Strict atomic disk persistence for `PersistentState` (using `System.Text.Json`), ensuring state integrity across node restarts.
-- **Interactive Cluster Demo:** A multi-node Key-Value Store (KVS) cluster demo included out-of-the-box (`Program.fs`).
+- **Interactive Cluster Demo:** A multi-node Key-Value Store (KVS) cluster demo included out-of-the-box (`Raft.App`).
 - **Comprehensive Test Suite:** Unit and integration tests covering election, log operations, replication, and transport layers.
 
 ## Project Structure
 
 ```text
-src/Raft/
+Raft/               # Core library (OutputType: Library)
 ├── Types.fs        # Core types (NodeRole, LogEntry, RaftMessage)
 ├── Log.fs          # Immutable log operations & conflict resolution
 ├── State.fs        # Raft state management (Persistent/Volatile)
@@ -27,10 +27,12 @@ src/Raft/
 ├── Replication.fs  # AppendEntries RPC & commit index advancement
 ├── Node.fs         # MailboxProcessor-based Actor implementation
 ├── Transport.fs    # Asynchronous TCP transport layer
-├── Persistence.fs  # Disk-based state persistence
-└── Program.fs      # Multi-node interactive CLI demo
+└── Persistence.fs  # Disk-based state persistence
 
-tests/Raft.Tests/   # xUnit-based Test Suite
+Raft.App/           # CLI entry point (references Raft library)
+└── Program.fs      # Multi-node interactive KVS demo
+
+Raft.Tests/         # xUnit-based Test Suite
 ```
 
 ## Prerequisites
@@ -51,17 +53,17 @@ You can run 3 nodes locally on different terminals to observe Raft in action.
 
 **Node 1 (Terminal A):**
 ```bash
-dotnet run --project src/Raft -- --node 0
+dotnet run --project Raft.App -- --node 0
 ```
 
 **Node 2 (Terminal B):**
 ```bash
-dotnet run --project src/Raft -- --node 1
+dotnet run --project Raft.App -- --node 1
 ```
 
 **Node 3 (Terminal C):**
 ```bash
-dotnet run --project src/Raft -- --node 2
+dotnet run --project Raft.App -- --node 2
 ```
 
 Once all nodes are running, they will perform leader election. You can then submit commands (e.g., `put x 100`) from the Leader's terminal and watch the command replicate to Follower nodes.
@@ -79,7 +81,7 @@ dotnet test /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura
 For a visual HTML report, you can optionally install [ReportGenerator](https://danielpalme.github.io/ReportGenerator/) and run:
 ```bash
 dotnet tool install -g dotnet-reportgenerator-globaltool
-reportgenerator -reports:"tests/Raft.Tests/coverage.cobertura.xml" -targetdir:"coveragereport" -reporttypes:Html
+reportgenerator -reports:"Raft.Tests/coverage.cobertura.xml" -targetdir:"coveragereport" -reporttypes:Html
 ```
 
 ---

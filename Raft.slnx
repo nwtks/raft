@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="Raft/Raft.fsproj" />
+  <Project Path="Raft.App/Raft.App.fsproj" />
+  <Project Path="Raft.Tests/Raft.Tests.fsproj" />
+</Solution>
