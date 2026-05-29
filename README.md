@@ -78,13 +78,3 @@ dotnet test
 # Run tests with coverage (Cobertura XML)
 dotnet test /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura
 ```
-
-For a visual HTML report, you can optionally install [ReportGenerator](https://danielpalme.github.io/ReportGenerator/) and run:
-```bash
-dotnet tool install -g dotnet-reportgenerator-globaltool
-reportgenerator -reports:"Raft.Tests/coverage.cobertura.xml" -targetdir:"coveragereport" -reporttypes:Html
-```
-
----
-
-*This is an educational implementation aimed at understanding distributed systems and highly concurrent F# design patterns.*

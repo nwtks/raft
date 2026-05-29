@@ -30,8 +30,6 @@ This file provides guidance for AI agents working in this repository.
 | `Transport.fs` | `TcpTransport`: async TCP listener + fire-and-forget sender using JSON over raw TCP |
 | `Persistence.fs` | `FilePersistence`: atomic disk writes to `state_{id}.json` via a `.tmp` swap |
 
-**F# compilation order matters.** Files inside each `.fsproj` must be listed in dependency order (e.g., `Types.fs` before everything else). When adding a new file, insert it at the correct position in the `<Compile>` list.
-
 ## Architecture
 
 ```
@@ -65,6 +63,8 @@ TCP connection timeout for outbound messages is **3 000 ms** (hardcoded in `Tran
 | `IntegrationTests.fs` | Multi-node end-to-end scenarios |
 
 Integration tests spin up real `RaftNode` instances on loopback ports and assert consensus behaviour. They are slower and may conflict if ports are already in use; run them in isolation when needed.
+
+Maintain high unit test coverage (at least line ~80%).
 
 ## Coding Conventions
 
