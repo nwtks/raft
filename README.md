@@ -51,30 +51,31 @@ dotnet build
 
 You can run 3 nodes locally on different terminals to observe Raft in action.
 
-**Node 1 (Terminal A):**
+| Node ID | Terminal | Port |
+|---|---|---|
+| 0 | Terminal A | 5000 |
+| 1 | Terminal B | 5001 |
+| 2 | Terminal C | 5002 |
+
 ```bash
-dotnet run --project Raft.App -- --node 0
+dotnet run --project Raft.App -- --node 0  # Terminal A
+dotnet run --project Raft.App -- --node 1  # Terminal B
+dotnet run --project Raft.App -- --node 2  # Terminal C
 ```
 
-**Node 2 (Terminal B):**
-```bash
-dotnet run --project Raft.App -- --node 1
-```
-
-**Node 3 (Terminal C):**
-```bash
-dotnet run --project Raft.App -- --node 2
-```
+Timing defaults: election timeout 1 500–3 000 ms, heartbeat 500 ms.
 
 Once all nodes are running, they will perform leader election. You can then submit commands (e.g., `put x 100`) from the Leader's terminal and watch the command replicate to Follower nodes.
 
-> **💡 Try Crash Recovery:** Terminate a node with `Ctrl+C` and restart it. The node will automatically recover its persisted `CurrentTerm` and `Log` from `state_{id}.json` and seamlessly rejoin the active cluster!
+> **💡 Try Crash Recovery:** Terminate a node with `Ctrl+C` and restart it. The node will automatically recover its persisted `CurrentTerm` and `Log` from `state_{id}.json` and seamlessly rejoin the active cluster! Persistence files are written to the **current working directory** as `state_0.json`, `state_1.json`, `state_2.json`.
 
 ### 3. Run Tests & Measure Coverage
 
-To execute the test suite and output an XML code coverage report (Cobertura format):
-
 ```bash
+# Run tests
+dotnet test
+
+# Run tests with coverage (Cobertura XML)
 dotnet test /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura
 ```
 
