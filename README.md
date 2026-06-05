@@ -4,35 +4,43 @@ A purely functional, highly robust implementation of the [Raft Consensus Algorit
 
 ## Overview
 
-This project implements the core mechanics of Raft—Leader Election and Log Replication—using F#'s strong type system, immutability, and actor model (`MailboxProcessor`). It focuses on thread-safety and correctness, avoiding complex locking mechanisms by serializing state updates through message passing.
+This project implements the core mechanics of Raft — Leader Election and Log Replication — using F#'s strong type system, immutability, and actor model (`MailboxProcessor`). It focuses on thread-safety and correctness, avoiding complex locking mechanisms by serializing all state updates through message passing.
 
 ## Features
 
-- **Leader Election:** Randomized election timeouts, RequestVote RPC handling, and dynamic leader promotion.
-- **Log Replication:** AppendEntries RPC handling, log conflict resolution, and commit index advancement.
-- **Actor Model Design:** Non-blocking, thread-safe state machine utilizing F#'s `MailboxProcessor` (`Node.fs`).
-- **TCP Transport Layer:** Custom JSON-based RPC serialization over raw TCP sockets using F# Discriminated Unions support (`Transport.fs`).
-- **Crash Recovery & Persistence:** Strict atomic disk persistence for `PersistentState` (using `System.Text.Json`), ensuring state integrity across node restarts.
-- **Interactive Cluster Demo:** A multi-node Key-Value Store (KVS) cluster demo included out-of-the-box (`Raft.App`).
-- **Comprehensive Test Suite:** Unit and integration tests covering election, log operations, replication, and transport layers.
+- **Leader Election:** Randomized election timeouts, `RequestVote` RPC handling, and dynamic leader promotion on majority vote.
+- **Log Replication:** `AppendEntries` RPC handling, log conflict resolution via `mergeEntries`, and commit index advancement.
+- **Actor Model Design:** Non-blocking, thread-safe state machine using F#'s `MailboxProcessor` (`Node.fs`). State is fully immutable; each message handler returns a new `RaftState` threaded through a tail-recursive `agentLoop`.
+- **TCP Transport Layer:** Custom JSON-based RPC serialization over raw TCP sockets using `FSharp.SystemTextJson` discriminated union support (`Transport.fs`).
+- **Crash Recovery & Persistence:** Atomic disk persistence for `PersistentState` (`CurrentTerm`, `VotedFor`, `Log`) via a `.tmp`-swap write, ensuring state integrity across restarts (`Persistence.fs`).
+- **Interactive Cluster Demo:** A 3-node Key-Value Store (KVS) cluster demo with `put`, `get`, `state`, and `quit` commands (`Raft.App`).
+- **Comprehensive Test Suite:** Unit and integration tests covering election, log operations, replication, actor behaviour, transport, and persistence.
 
 ## Project Structure
 
 ```text
 Raft/               # Core library (OutputType: Library)
-├── Types.fs        # Core types (NodeRole, LogEntry, RaftMessage)
-├── Log.fs          # Immutable log operations & conflict resolution
-├── State.fs        # Raft state management (Persistent/Volatile)
+├── Types.fs        # Core types (NodeId, Term, LogIndex, LogEntry, NodeRole, RPC messages, NodeConfig)
+├── Log.fs          # Pure immutable log operations & conflict resolution
+├── State.fs        # RaftState, PersistentState, VolatileState, LeaderState; IPersistence interface
 ├── Election.fs     # RequestVote RPC & quorum logic
 ├── Replication.fs  # AppendEntries RPC & commit index advancement
-├── Node.fs         # MailboxProcessor-based Actor implementation
-├── Transport.fs    # Asynchronous TCP transport layer
-└── Persistence.fs  # Disk-based state persistence
+├── Node.fs         # MailboxProcessor actor, ITransport interface, timer management
+├── Transport.fs    # Asynchronous TCP transport (TcpTransport)
+└── Persistence.fs  # Atomic disk persistence (FilePersistence)
 
 Raft.App/           # CLI entry point (references Raft library)
-└── Program.fs      # Multi-node interactive KVS demo
+└── Program.fs      # 3-node interactive KVS demo
 
-Raft.Tests/         # xUnit-based Test Suite
+Raft.Tests/         # xunit.v3 test suite
+├── LogTests.fs
+├── StateTests.fs
+├── ElectionTests.fs
+├── ReplicationTests.fs
+├── IntegrationTests.fs  # Pure-function end-to-end scenarios (no TCP, no actors)
+├── NodeTests.fs         # RaftNode actor tests (MockTransport / MockPersistence)
+├── TransportTests.fs    # TcpTransport loopback tests
+└── PersistenceTests.fs
 ```
 
 ## Prerequisites
@@ -49,13 +57,13 @@ dotnet build
 
 ### 2. Run the Multi-Node Cluster Demo
 
-You can run 3 nodes locally on different terminals to observe Raft in action.
+Start 3 nodes in separate terminals. Each node listens on a fixed loopback port:
 
-| Node ID | Terminal | Port |
-|---|---|---|
-| 0 | Terminal A | 5000 |
-| 1 | Terminal B | 5001 |
-| 2 | Terminal C | 5002 |
+| Node ID | Port |
+|---------|------|
+| 0 | 5000 |
+| 1 | 5001 |
+| 2 | 5002 |
 
 ```bash
 dotnet run --project Raft.App -- --node 0  # Terminal A
@@ -65,16 +73,20 @@ dotnet run --project Raft.App -- --node 2  # Terminal C
 
 Timing defaults: election timeout 1 500–3 000 ms, heartbeat 500 ms.
 
-Once all nodes are running, they will perform leader election. You can then submit commands (e.g., `put x 100`) from the Leader's terminal and watch the command replicate to Follower nodes.
+Once all nodes are running they will perform leader election automatically. From any terminal you can enter the following commands:
 
-> **💡 Try Crash Recovery:** Terminate a node with `Ctrl+C` and restart it. The node will automatically recover its persisted `CurrentTerm` and `Log` from `state_{id}.json` and seamlessly rejoin the active cluster! Persistence files are written to the **current working directory** as `state_0.json`, `state_1.json`, `state_2.json`.
+| Command | Description |
+|---------|-------------|
+| `put <key> <value>` | Submit a write to the cluster (only accepted by the Leader) |
+| `get <key>` | Read from the local node's in-memory KVS state |
+| `state` | Print the node's current role, term, commit index, and log length |
+| `quit` / `q` | Exit |
+
+> **💡 Try Crash Recovery:** Terminate a node with `Ctrl+C` and restart it. The node will automatically recover its persisted `CurrentTerm` and `Log` from its state file and seamlessly rejoin the cluster. Persistence files are written to the **current working directory** as `state_0.json`, `state_1.json`, `state_2.json`.
 
 ### 3. Run Tests & Measure Coverage
 
 ```bash
-# Run tests
+# Run all tests with coverage report
 dotnet test
-
-# Run tests with coverage (Cobertura XML)
-dotnet test /p:CollectCoverage=true /p:CoverletOutputFormat=cobertura
 ```

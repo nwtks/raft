@@ -7,7 +7,7 @@ This file provides guidance for AI agents working in this repository.
 - **Language**: F# on .NET 8.0
 - **Solution file**: `Raft.slnx`
 - **Serialization**: `System.Text.Json` + `FSharp.SystemTextJson` (`JsonFSharpConverter`)
-- **Test framework**: xUnit with Coverlet for coverage
+- **Test framework**: xunit.v3 with Coverlet for coverage
 
 ## Project Layout
 
@@ -21,12 +21,12 @@ This file provides guidance for AI agents working in this repository.
 
 | File | Responsibility |
 |---|---|
-| `Types.fs` | Core types: `NodeId`, `Term`, `LogEntry`, `NodeRole`, all RPC message types, `NodeConfig` |
-| `Log.fs` | Pure log operations (append, conflict resolution, index lookup) |
-| `State.fs` | `RaftState`, `PersistentState`, `VolatileState`, `LeaderState`; `IPersistence` interface |
-| `Election.fs` | `RequestVote` RPC creation and handling; quorum logic |
-| `Replication.fs` | `AppendEntries` RPC creation and handling; commit index advancement |
-| `Node.fs` | `RaftNode` actor (`MailboxProcessor`); `ITransport` interface; main message loop |
+| `Types.fs` | Core types: `NodeId`, `Term`, `LogIndex`, `LogEntry`, `NodeRole`, all RPC message/response types, `PeerInfo`, `NodeConfig` |
+| `Log.fs` | Pure log operations: `append`, `mergeEntries` (conflict resolution), `entriesFrom`, `getEntry`, index/term lookup |
+| `State.fs` | `PersistentState`, `VolatileState`, `LeaderState`, `RaftState`; `IPersistence` interface; pure state-transition helpers |
+| `Election.fs` | `startElection`, `createRequestVote`, `handleRequestVote`, `handleVoteResponse`; quorum promotion to Leader |
+| `Replication.fs` | `createAppendEntries`, `createHeartbeat`, `handleAppendEntries`, `handleAppendEntriesResponse`, `advanceCommitIndex`, `appendCommand` |
+| `Node.fs` | `ITransport` interface; `Node.Context` record; `RaftNode` actor (`MailboxProcessor`); `agentLoop`; timer management |
 | `Transport.fs` | `TcpTransport`: async TCP listener + fire-and-forget sender using JSON over raw TCP |
 | `Persistence.fs` | `FilePersistence`: atomic disk writes to `state_{id}.json` via a `.tmp` swap |
 
@@ -34,42 +34,67 @@ This file provides guidance for AI agents working in this repository.
 
 ```
 RaftNode (MailboxProcessor)
-  ├── ITransport  (injected — default: TcpTransport)
-  ├── IPersistence (injected — default: FilePersistence)
+  ├── ITransport   (injected — default: TcpTransport)     [defined in Node.fs]
+  ├── IPersistence (injected — default: FilePersistence)  [defined in State.fs]
   └── onApply: LogEntry -> unit  (state machine callback, injected by caller)
+```
+
+Internally, the agent loop threads a `Node.Context` record through each step:
+
+```fsharp
+type Context =
+    { Config: NodeConfig
+      Transport: ITransport
+      Persistence: IPersistence
+      OnApply: LogEntry -> unit
+      Inbox: MailboxProcessor<NodeMessage>
+      State: RaftState
+      ElectionTimer: Timer option
+      HeartbeatTimer: Timer option }
 ```
 
 State is **immutable**. Every handler returns a new `RaftState`; the agent loop threads it through via tail-recursive `agentLoop`. Never mutate `RaftState` directly.
 
 `PersistentState` (`CurrentTerm`, `VotedFor`, `Log`) must be flushed to disk **before** replying to any RPC. The `saveIfChanged` helper in `Node.fs` enforces this — always call it after state transitions.
 
+### Timer Handling
+
+- **Election timer**: one-shot `System.Threading.Timer`; reset on receiving any valid RPC, or on becoming Follower. Fires `ElectionTimeout` into the inbox.
+- **Heartbeat timer**: one-shot timer; reset whenever the node is Leader. Fires `HeartbeatTimeout` into the inbox.
+- Becoming Leader: stops the election timer, starts the heartbeat timer.
+- Stepping down: stops the heartbeat timer, restarts the election timer.
+
 ## Transport Wire Format
 
-Messages are serialized as JSON using `FSharp.SystemTextJson` with `JsonFSharpConverter`. The union case name is the discriminator (default FSharp.SystemTextJson behaviour). The buffer size is 65 536 bytes per message; do not send messages larger than this without changing `Transport.fs`.
+Messages are serialized as JSON using `FSharp.SystemTextJson` with `JsonFSharpConverter`. The union case name is the discriminator (default FSharp.SystemTextJson behaviour). The buffer size is **65 536 bytes** per message; do not send messages larger than this without changing `Transport.fs`.
 
 TCP connection timeout for outbound messages is **3 000 ms** (hardcoded in `Transport.sendMessage`).
+
+`ClientCommand` (the `AsyncReplyChannel` case) is never sent over the wire — it is only posted locally to the inbox.
 
 ## Test Suite
 
 | File | Coverage area |
 |---|---|
-| `ElectionTests.fs` | `Election` module |
-| `ReplicationTests.fs` | `Replication` module |
-| `LogTests.fs` | `Log` module |
-| `StateTests.fs` | `State` module |
-| `NodeTests.fs` | `RaftNode` actor behaviour |
-| `PersistenceTests.fs` | `FilePersistence` |
-| `TransportTests.fs` | `TcpTransport` |
-| `IntegrationTests.fs` | Multi-node end-to-end scenarios |
+| `LogTests.fs` | `Log` module — pure log operations |
+| `StateTests.fs` | `State` module — init and state transitions |
+| `ElectionTests.fs` | `Election` module — vote granting, quorum, term updates |
+| `ReplicationTests.fs` | `Replication` module — AppendEntries, commit index |
+| `IntegrationTests.fs` | Multi-step pure-function scenarios (no TCP, no actors) |
+| `NodeTests.fs` | `RaftNode` actor behaviour using `MockTransport` / `MockPersistence` |
+| `TransportTests.fs` | `TcpTransport` — real loopback TCP send/receive |
+| `PersistenceTests.fs` | `FilePersistence` — save/load round-trip and overwrite |
 
-Integration tests spin up real `RaftNode` instances on loopback ports and assert consensus behaviour. They are slower and may conflict if ports are already in use; run them in isolation when needed.
+**`IntegrationTests.fs`** exercises end-to-end Raft scenarios (leader election, log replication, log inconsistency recovery, split-brain, stale leader rejection) by calling the pure `Election`, `Replication`, and `State` module functions directly — **no TCP sockets, no `RaftNode` actor, no real timers**. These tests are fast and deterministic.
 
-Maintain high unit test coverage (at least line ~80%).
+**`TransportTests.fs`** is the only test file that opens real TCP sockets on loopback. It may conflict if ports are already in use; run in isolation when needed.
+
+Maintain high unit test coverage (target: ≥ 80% line coverage).
 
 ## Coding Conventions
 
 - All algorithm logic goes in `Raft/` (pure functions where possible, no I/O side effects).
 - Side-effecting concerns (network, disk) are hidden behind `ITransport` / `IPersistence` interfaces and injected at the `RaftNode` constructor — keep them mockable.
 - Prefer `async {}` computation expressions for async work inside the actor; use `task {}` for the transport layer (interop with .NET `Task`-based APIs).
-- Use `[<TailCall>]` on recursive agent-loop functions to prevent stack overflows.
+- Use `[<TailCall>]` on recursive functions (`agentLoop`, `Log._merge`, `inputLoop` in App) to prevent stack overflows.
 - Do not introduce new external NuGet packages without checking existing dependencies in the `.fsproj` files first.
