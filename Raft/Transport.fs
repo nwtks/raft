@@ -1,24 +1,19 @@
 namespace Raft
 
-open System.Net
-open System.Net.Sockets
-open System.Text
-open System.Text.Json
-open System.Text.Json.Serialization
-open System.Threading
-open System.Threading.Tasks
-
 module Transport =
     let jsonOptions =
-        let options = JsonSerializerOptions()
-        options.Converters.Add(JsonFSharpConverter())
+        let options = System.Text.Json.JsonSerializerOptions()
+        options.Converters.Add(OptionConverterFactory())
+        options.Converters.Add(RaftMessageConverter())
         options
 
-    let log (msg: string) = printfn "[Transport] %s" msg
+    let log msg = printfn "[Transport] %s" msg
 
-    let startListener (config: NodeConfig) (postMessage: RaftMessage -> unit) (ct: CancellationToken) =
+    let startListener config postMessage (ct: System.Threading.CancellationToken) =
         task {
-            let listener = new TcpListener(IPAddress.Any, config.Port)
+            let listener =
+                new System.Net.Sockets.TcpListener(System.Net.IPAddress.Any, config.Port)
+
             listener.Start()
             log $"Listening on port {config.Port}."
 
@@ -40,10 +35,12 @@ module Transport =
                         let! bytesRead = stream.ReadAsync(buffer, 0, buffer.Length, ct) |> Async.AwaitTask
 
                         if bytesRead > 0 then
-                            let json = Encoding.UTF8.GetString(buffer, 0, bytesRead)
+                            let json = System.Text.Encoding.UTF8.GetString(buffer, 0, bytesRead)
 
                             try
-                                let msg = JsonSerializer.Deserialize<RaftMessage>(json, jsonOptions)
+                                let msg =
+                                    System.Text.Json.JsonSerializer.Deserialize<RaftMessage>(json, jsonOptions)
+
                                 postMessage msg
                             with ex ->
                                 log $"Error deserializing message: {ex.Message}."
@@ -54,16 +51,19 @@ module Transport =
             | ex -> log $"Listener error: {ex.Message}."
         }
 
-    let sendMessage (peer: PeerInfo) (msg: RaftMessage) =
+    let sendMessage (peer: PeerInfo) msg =
         task {
             try
-                use client = new TcpClient()
+                use client = new System.Net.Sockets.TcpClient()
                 let connectTask = client.ConnectAsync(peer.Host, peer.Port)
-                let timeoutTask = Task.Delay 3000
-                let! completed = Task.WhenAny(connectTask, timeoutTask)
+                let timeoutTask = System.Threading.Tasks.Task.Delay 3000
+                let! completed = System.Threading.Tasks.Task.WhenAny(connectTask, timeoutTask)
 
                 if completed = connectTask && client.Connected then
-                    let bytes = JsonSerializer.Serialize(msg, jsonOptions) |> Encoding.UTF8.GetBytes
+                    let bytes =
+                        System.Text.Json.JsonSerializer.Serialize(msg, jsonOptions)
+                        |> System.Text.Encoding.UTF8.GetBytes
+
                     use stream = client.GetStream()
                     do! stream.WriteAsync(bytes, 0, bytes.Length)
                 else
@@ -75,7 +75,7 @@ module Transport =
 
 type TcpTransport() =
     interface ITransport with
-        member _.StartListener (config: NodeConfig) (postMessage: RaftMessage -> unit) (ct: CancellationToken) =
+        member _.StartListener config postMessage ct =
             Transport.startListener config postMessage ct
 
-        member _.SendMessage (peer: PeerInfo) (msg: RaftMessage) = Transport.sendMessage peer msg
+        member _.SendMessage peer msg = Transport.sendMessage peer msg

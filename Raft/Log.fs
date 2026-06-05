@@ -3,27 +3,27 @@ namespace Raft
 module Log =
     let empty: LogEntry list = []
 
-    let lastIndex (log: LogEntry list) : LogIndex =
-        match log with
+    let lastIndex =
+        function
         | [] -> 0L
-        | _ -> (List.last log).Index
+        | log -> (List.last log).Index
 
-    let lastTerm (log: LogEntry list) : Term =
-        match log with
+    let lastTerm =
+        function
         | [] -> 0L
-        | _ -> (List.last log).Term
+        | log -> (List.last log).Term
 
-    let getEntry (index: LogIndex) (log: LogEntry list) =
+    let getEntry index log =
         log |> List.tryFind (fun e -> e.Index = index)
 
-    let termAt (index: LogIndex) (log: LogEntry list) : Term =
+    let termAt index log =
         match getEntry index log with
         | Some entry -> entry.Term
         | None -> 0L
 
-    let appendEntry (entry: LogEntry) (log: LogEntry list) = log @ [ entry ]
+    let appendEntry entry log = log @ [ entry ]
 
-    let append (term: Term) (command: string) (log: LogEntry list) =
+    let append term command log =
         let nextIndex = lastIndex log + 1L
 
         let entry =
@@ -33,17 +33,17 @@ module Log =
 
         appendEntry entry log
 
-    let truncateFrom (index: LogIndex) (log: LogEntry list) =
+    let truncateFrom index log =
         log |> List.takeWhile (fun e -> e.Index < index)
 
-    let entriesFrom (index: LogIndex) (log: LogEntry list) =
+    let entriesFrom index log =
         log |> List.skipWhile (fun e -> e.Index < index)
 
     [<TailCall>]
-    let rec _merge (acc: LogEntry list) (remaining: LogEntry list) =
-        match remaining with
+    let rec _merge acc =
+        function
         | [] -> acc
-        | entry :: rest ->
+        | entry :: rest as remaining ->
             match getEntry entry.Index acc with
             | Some existing when existing.Term <> entry.Term ->
                 let truncated = truncateFrom entry.Index acc
@@ -51,4 +51,4 @@ module Log =
             | Some _ -> _merge acc rest
             | None -> acc @ remaining
 
-    let mergeEntries (entries: LogEntry list) (log: LogEntry list) = _merge log entries
+    let mergeEntries entries log = _merge log entries

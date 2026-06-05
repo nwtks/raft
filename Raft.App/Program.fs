@@ -1,6 +1,5 @@
 module Raft.App
 
-open System.Threading
 open Raft
 
 let peers =
@@ -54,14 +53,14 @@ let getValue (cmd: string) kvs =
         | Some v -> printfn "%s" v
         | None -> printfn "(not found)"
 
-let submitCommand (cmd: string) (node: RaftNode) =
+let submitCommand cmd (node: RaftNode) =
     let success = node.SubmitCommand cmd
 
     if not success then
         printfn "Error: Not the leader. Cannot accept writes."
 
 [<TailCall>]
-let rec inputLoop (node: RaftNode) kvs =
+let rec inputLoop node kvs =
     printf "> "
     let input = System.Console.ReadLine()
 
@@ -88,7 +87,7 @@ let rec inputLoop (node: RaftNode) kvs =
 let runNode nodeId =
     let mutable kvs = Map.empty<string, string>
 
-    let onApply (entry: LogEntry) =
+    let onApply entry =
         printfn "\n>>> Applied [%d:T%d]: %s" entry.Index entry.Term entry.Command
 
         match entry.Command.Split(' ') with
@@ -102,7 +101,7 @@ let runNode nodeId =
     let transport = TcpTransport()
     let persistence = FilePersistence nodeId
     let node = RaftNode(config, transport, persistence, onApply)
-    Thread.Sleep 2000
+    System.Threading.Thread.Sleep 2000
     printCommands ()
     inputLoop node kvs
 

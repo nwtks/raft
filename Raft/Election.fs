@@ -1,7 +1,7 @@
 namespace Raft
 
 module Election =
-    let startElection (state: RaftState) =
+    let startElection state =
         let newTerm = state.Persistent.CurrentTerm + 1L
 
         { state with
@@ -14,13 +14,13 @@ module Election =
             LeaderState = None
             CurrentLeader = None }
 
-    let createRequestVote (state: RaftState) =
+    let createRequestVote state =
         { CandidateTerm = state.Persistent.CurrentTerm
           CandidateId = state.Config.NodeId
           LastLogIndex = Log.lastIndex state.Persistent.Log
           LastLogTerm = Log.lastTerm state.Persistent.Log }
 
-    let handleRequestVote (rv: RequestVote) (state: RaftState) =
+    let handleRequestVote rv state =
         let state2 = State.updateTerm rv.CandidateTerm state
 
         let canVote =
@@ -50,7 +50,7 @@ module Election =
 
         newState, response
 
-    let handleVoteResponse (fromNode: NodeId) (resp: RequestVoteResponse) (state: RaftState) =
+    let handleVoteResponse fromNode resp state =
         if resp.VoterTerm > state.Persistent.CurrentTerm then
             State.updateTerm resp.VoterTerm state
         elif state.Role = Candidate && resp.VoteGranted then

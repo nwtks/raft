@@ -4,7 +4,7 @@ This file provides guidance for AI agents working in this repository.
 
 ## Tech Stack
 
-- **Language**: F# on .NET 8.0
+- **Language**: F# on .NET 10.0
 - **Solution file**: `Raft.slnx`
 - **Serialization**: `System.Text.Json` + `FSharp.SystemTextJson` (`JsonFSharpConverter`)
 - **Test framework**: xunit.v3 with Coverlet for coverage

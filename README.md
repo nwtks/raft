@@ -45,7 +45,7 @@ Raft.Tests/         # xunit.v3 test suite
 
 ## Prerequisites
 
-- [.NET 8.0 SDK](https://dotnet.microsoft.com/download)
+- [.NET 10.0 SDK](https://dotnet.microsoft.com/download)
 
 ## Getting Started
 

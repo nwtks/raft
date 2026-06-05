@@ -1,7 +1,5 @@
 module Raft.Tests.TransportTests
 
-open System.Threading
-open System.Threading.Tasks
 open Xunit
 open Raft
 
@@ -23,13 +21,13 @@ let dummyPeer port =
 let ``sendMessage triggers listener and receives message`` () =
     let port = 15001
     let config = dummyConfig port
-    let cts = new CancellationTokenSource()
-    let tcs = TaskCompletionSource<RaftMessage>()
+    let cts = new System.Threading.CancellationTokenSource()
+    let tcs = System.Threading.Tasks.TaskCompletionSource<RaftMessage>()
     let postMessage msg = tcs.TrySetResult msg |> ignore
     let tcpTransport = TcpTransport() :> ITransport
     tcpTransport.StartListener config postMessage cts.Token |> ignore
 
-    Thread.Sleep 500
+    System.Threading.Thread.Sleep 500
 
     let reqVote =
         { CandidateTerm = 1L

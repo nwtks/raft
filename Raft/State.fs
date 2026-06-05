@@ -27,7 +27,7 @@ type RaftState =
       Config: NodeConfig }
 
 module State =
-    let init (config: NodeConfig) (loadedState: PersistentState option) =
+    let init config loadedState =
         let persistent =
             match loadedState with
             | Some p -> p
@@ -44,7 +44,7 @@ module State =
           CurrentLeader = None
           Config = config }
 
-    let initLeaderState (state: RaftState) =
+    let initLeaderState state =
         let nextIdx = Log.lastIndex state.Persistent.Log + 1L
 
         let leaderState =
@@ -56,7 +56,7 @@ module State =
             LeaderState = Some leaderState
             CurrentLeader = Some state.Config.NodeId }
 
-    let updateTerm (newTerm: Term) (state: RaftState) =
+    let updateTerm newTerm state =
         if newTerm > state.Persistent.CurrentTerm then
             { state with
                 Persistent =
@@ -69,41 +69,37 @@ module State =
         else
             state
 
-    let updateLog (newLog: LogEntry list) (state: RaftState) =
+    let updateLog newLog state =
         { state with
             Persistent = { state.Persistent with Log = newLog } }
 
-    let updateLogAndCommit (newLog: LogEntry list) (newCommitIndex: LogIndex) (state: RaftState) =
+    let updateLogAndCommit newLog newCommitIndex state =
         { state with
             Persistent = { state.Persistent with Log = newLog }
             Volatile =
                 { state.Volatile with
                     CommitIndex = newCommitIndex } }
 
-    let updateCommitIndex (newCommitIndex: LogIndex) (state: RaftState) =
+    let updateCommitIndex newCommitIndex state =
         { state with
             Volatile =
                 { state.Volatile with
                     CommitIndex = newCommitIndex } }
 
-    let updateLastApplied (newLastApplied: LogIndex) (state: RaftState) =
+    let updateLastApplied newLastApplied state =
         { state with
             Volatile =
                 { state.Volatile with
                     LastApplied = newLastApplied } }
 
-    let followLeader (leaderTerm: Term) (leaderId: NodeId) (state: RaftState) =
+    let followLeader leaderTerm leaderId state =
         let s = updateTerm leaderTerm state
 
         { s with
             Role = Follower
             CurrentLeader = Some leaderId }
 
-    let updateLeaderState
-        (newNextIndex: Map<NodeId, LogIndex>)
-        (newMatchIndex: Map<NodeId, LogIndex>)
-        (state: RaftState)
-        =
+    let updateLeaderState newNextIndex newMatchIndex state =
         match state.LeaderState with
         | Some ls ->
             { state with
@@ -114,15 +110,15 @@ module State =
                             MatchIndex = newMatchIndex } }
         | None -> state
 
-    let recordVote (candidateId: NodeId) (state: RaftState) =
+    let recordVote candidateId state =
         { state with
             Persistent =
                 { state.Persistent with
                     VotedFor = Some candidateId } }
 
-    let addVoteReceived (nodeId: NodeId) (state: RaftState) =
+    let addVoteReceived nodeId state =
         { state with
             VotesReceived = state.VotesReceived |> Set.add nodeId }
 
-    let quorumSize (state: RaftState) =
+    let quorumSize state =
         (List.length state.Config.Peers + 1) / 2 + 1

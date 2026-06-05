@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
   </PropertyGroup>
 
   <ItemGroup>
@@ -10,13 +10,14 @@
     <Compile Include="State.fs" />
     <Compile Include="Election.fs" />
     <Compile Include="Replication.fs" />
+    <Compile Include="NodeTypes.fs" />
+    <Compile Include="NodeTimer.fs" />
+    <Compile Include="NodeBroadcaster.fs" />
+    <Compile Include="NodeAgent.fs" />
     <Compile Include="Node.fs" />
+    <Compile Include="Serialization.fs" />
     <Compile Include="Transport.fs" />
     <Compile Include="Persistence.fs" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <PackageReference Include="FSharp.SystemTextJson" Version="1.*" />
   </ItemGroup>
 
 </Project>

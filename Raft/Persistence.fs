@@ -1,24 +1,20 @@
 namespace Raft
 
-open System.IO
-open System.Text.Json
-open System.Text.Json.Serialization
-
 module Persistence =
-    let options = JsonSerializerOptions()
-    do options.Converters.Add(JsonFSharpConverter())
+    let options = System.Text.Json.JsonSerializerOptions()
+    do options.Converters.Add(OptionConverterFactory())
 
-    let save fileName (state: PersistentState) =
-        let json = JsonSerializer.Serialize(state, options)
+    let save fileName state =
+        let json = System.Text.Json.JsonSerializer.Serialize(state, options)
         let tempFile = fileName + ".tmp"
-        File.WriteAllText(tempFile, json)
-        File.Move(tempFile, fileName, true)
+        System.IO.File.WriteAllText(tempFile, json)
+        System.IO.File.Move(tempFile, fileName, true)
 
     let load fileName =
-        if File.Exists fileName then
+        if System.IO.File.Exists fileName then
             try
-                let json = File.ReadAllText fileName
-                Some(JsonSerializer.Deserialize<PersistentState>(json, options))
+                let json = System.IO.File.ReadAllText fileName
+                Some(System.Text.Json.JsonSerializer.Deserialize<PersistentState>(json, options))
             with _ ->
                 None
         else
@@ -28,5 +24,5 @@ type FilePersistence(nodeId: NodeId) =
     let fileName = sprintf "state_%d.json" nodeId
 
     interface IPersistence with
-        member _.Save(state: PersistentState) = Persistence.save fileName state
+        member _.Save state = Persistence.save fileName state
         member _.Load() = Persistence.load fileName

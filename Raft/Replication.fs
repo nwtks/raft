@@ -1,11 +1,7 @@
 namespace Raft
 
 module Replication =
-    let createEntries
-        (entries: LogIndex -> LogEntry list)
-        (followerId: NodeId)
-        (state: RaftState)
-        : AppendEntries option =
+    let createEntries entries followerId state =
         match state.LeaderState with
         | None -> None
         | Some ls ->
@@ -21,13 +17,13 @@ module Replication =
                   Entries = entries nextIdx
                   LeaderCommit = state.Volatile.CommitIndex }
 
-    let createAppendEntries (followerId: NodeId) (state: RaftState) : AppendEntries option =
+    let createAppendEntries followerId state =
         createEntries (fun index -> Log.entriesFrom index state.Persistent.Log) followerId state
 
-    let createHeartbeat (followerId: NodeId) (state: RaftState) : AppendEntries option =
+    let createHeartbeat followerId state =
         createEntries (fun _ -> Log.empty) followerId state
 
-    let handleAppendEntries (ae: AppendEntries) (state: RaftState) : RaftState * AppendEntriesResponse =
+    let handleAppendEntries ae state =
         if ae.LeaderTerm < state.Persistent.CurrentTerm then
             let response =
                 { FollowerTerm = state.Persistent.CurrentTerm
@@ -77,7 +73,7 @@ module Replication =
 
                 state2, response
 
-    let handleAppendEntriesResponse (resp: AppendEntriesResponse) (state: RaftState) : RaftState =
+    let handleAppendEntriesResponse resp state =
         if resp.FollowerTerm > state.Persistent.CurrentTerm then
             State.updateTerm resp.FollowerTerm state
         else
@@ -96,14 +92,14 @@ module Replication =
                     let newNextIndex = ls.NextIndex |> Map.add resp.FollowerId newNext
                     State.updateLeaderState newNextIndex ls.MatchIndex state
 
-    let canCommitIndex (matchIndices: LogIndex list) (majority: int) (state: RaftState) (index: LogIndex) =
+    let canCommitIndex matchIndices majority state index =
         let count = matchIndices |> List.filter (fun m -> m >= index) |> List.length
 
         count >= majority
         && index > state.Volatile.CommitIndex
         && Log.termAt index state.Persistent.Log = state.Persistent.CurrentTerm
 
-    let advanceCommitIndex (state: RaftState) : RaftState =
+    let advanceCommitIndex state =
         match state.LeaderState with
         | None -> state
         | Some ls ->
@@ -123,7 +119,7 @@ module Replication =
 
             State.updateCommitIndex newCommitIndex state
 
-    let appendCommand (command: string) (state: RaftState) : RaftState =
+    let appendCommand command state =
         if state.Role <> Leader then
             state
         else

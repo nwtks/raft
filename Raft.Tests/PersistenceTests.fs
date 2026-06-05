@@ -1,6 +1,5 @@
 module Raft.Tests.PersistenceTests
 
-open System.IO
 open Xunit
 open Raft
 
@@ -12,8 +11,8 @@ let ``Load returns None when file does not exist`` () =
     let persistence = FilePersistence nodeId :> IPersistence
     let fileName = sprintf "state_%d.json" nodeId
 
-    if File.Exists fileName then
-        File.Delete fileName
+    if System.IO.File.Exists fileName then
+        System.IO.File.Delete fileName
 
     let result = persistence.Load()
     Assert.True result.IsNone
@@ -47,8 +46,8 @@ let ``Save correctly serializes and Load correctly deserializes the state`` () =
         Assert.Equal("put x 1", loadedState.Log.[0].Command)
         Assert.Equal("put y 2", loadedState.Log.[1].Command)
     finally
-        if File.Exists fileName then
-            File.Delete fileName
+        if System.IO.File.Exists fileName then
+            System.IO.File.Delete fileName
 
 [<Fact>]
 let ``Save overwrites previous state successfully`` () =
@@ -77,5 +76,5 @@ let ``Save overwrites previous state successfully`` () =
         Assert.Equal(2L, loadedState.CurrentTerm)
         Assert.Equal(Some 5, loadedState.VotedFor)
     finally
-        if File.Exists fileName then
-            File.Delete fileName
+        if System.IO.File.Exists fileName then
+            System.IO.File.Delete fileName
