@@ -91,7 +91,14 @@ module NodeAgent =
 
             if response.Success then
                 let snapData = snap.Data
-                ctx.OnInstallSnapshot snapData
+
+                async {
+                    try
+                        ctx.OnInstallSnapshot snapData
+                    with ex ->
+                        log $"Error applying snapshot: {ex.Message}"
+                }
+                |> Async.Start
 
             match ctx.Config.Peers |> List.tryFind (fun p -> p.Id = snap.LeaderId) with
             | Some peer -> NodeBroadcaster.sendAsync ctx.Transport peer (InstallSnapshotResponseMsg response)
