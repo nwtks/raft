@@ -137,10 +137,11 @@ module Replication =
                 |> List.sortDescending
 
             let majority = State.quorumSize state
+            let lastIdx = Log.lastIndex state.Persistent.Log
 
             let newCommitIndex =
-                [ state.Volatile.CommitIndex .. Log.lastIndex state.Persistent.Log ]
-                |> List.tryFindBack (canCommitIndex matchIndices majority state)
+                seq { lastIdx .. -1L .. state.Volatile.CommitIndex + 1L }
+                |> Seq.tryFind (canCommitIndex matchIndices majority state)
                 |> Option.defaultValue state.Volatile.CommitIndex
 
             State.updateCommitIndex newCommitIndex state
