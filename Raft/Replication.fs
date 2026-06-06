@@ -221,6 +221,15 @@ module Replication =
 
             State.updateCommitIndex newCommitIndex state
 
+    let appendConfiguration peers state =
+        if state.Role <> Leader then
+            state
+        else
+            let json = System.Text.Json.JsonSerializer.Serialize(peers)
+            let command = Constants.ConfigCommandPrefix + json
+            let newLog = Log.append state.Persistent.CurrentTerm command state.Persistent.Log
+            State.updateLog newLog state
+
     let appendCommand command state =
         if state.Role <> Leader then
             state

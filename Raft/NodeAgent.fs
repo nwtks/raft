@@ -7,14 +7,25 @@ module NodeAgent =
     let rec loopApplyCommitted onApply state lastApplied =
         if lastApplied < state.Volatile.CommitIndex then
             let next = lastApplied + 1L
-            Log.getEntry next state.Persistent.Log |> Option.iter onApply
-            loopApplyCommitted onApply state next
+
+            match Log.getEntry next state.Persistent.Log with
+            | Some entry when entry.Command.StartsWith Constants.ConfigCommandPrefix ->
+                let json = entry.Command.Substring Constants.ConfigCommandPrefix.Length
+                let newPeers = System.Text.Json.JsonSerializer.Deserialize<PeerInfo list> json
+                let state2 = State.updateConfig newPeers state
+                loopApplyCommitted onApply state2 next
+            | Some entry ->
+                onApply entry
+                loopApplyCommitted onApply state next
+            | None -> loopApplyCommitted onApply state next
         else
-            lastApplied
+            state, lastApplied
 
     let applyCommitted onApply state =
-        let lastApplied = loopApplyCommitted onApply state state.Volatile.LastApplied
-        State.updateLastApplied lastApplied state
+        let state2, lastApplied =
+            loopApplyCommitted onApply state state.Volatile.LastApplied
+
+        State.updateLastApplied lastApplied state2
 
     let saveIfChanged ctx newState =
         if ctx.State.Persistent <> newState.Persistent then
@@ -92,6 +103,47 @@ module NodeAgent =
             let state2 = Replication.advanceCommitIndex state
             saveIfChanged ctx state2
             state2, false
+        | AddPeer(peerInfo, replyChannel) ->
+            if ctx.State.Role = Leader then
+                let newPeers =
+                    if ctx.State.Config.Peers |> List.exists (fun p -> p.Id = peerInfo.Id) then
+                        ctx.State.Config.Peers
+                    else
+                        peerInfo :: ctx.State.Config.Peers
+
+                let state = Replication.appendConfiguration newPeers ctx.State
+                saveIfChanged ctx state
+
+                let state2 =
+                    match state.LeaderState with
+                    | Some ls ->
+                        let lastIdx = Log.lastIndex state.Persistent.Log
+
+                        { state with
+                            LeaderState =
+                                Some
+                                    { ls with
+                                        NextIndex = ls.NextIndex |> Map.add peerInfo.Id (lastIdx + 1L)
+                                        MatchIndex = ls.MatchIndex |> Map.add peerInfo.Id 0L } }
+                    | None -> state
+
+                NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state2
+                replyChannel |> Option.iter (fun ch -> ch.Reply true)
+                state2, false
+            else
+                replyChannel |> Option.iter (fun ch -> ch.Reply false)
+                ctx.State, false
+        | RemovePeer(peerId, replyChannel) ->
+            if ctx.State.Role = Leader then
+                let newPeers = ctx.State.Config.Peers |> List.filter (fun p -> p.Id <> peerId)
+                let state = Replication.appendConfiguration newPeers ctx.State
+                saveIfChanged ctx state
+                NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state
+                replyChannel |> Option.iter (fun ch -> ch.Reply true)
+                state, false
+            else
+                replyChannel |> Option.iter (fun ch -> ch.Reply false)
+                ctx.State, false
         | ClientCommand(cmd, replyChannel) ->
             if ctx.State.Role = Leader then
                 let state = Replication.appendCommand cmd ctx.State
@@ -147,12 +199,19 @@ module NodeAgent =
             | RaftRPC rpcMsg ->
                 let state, electionTimer, heartbeatTimer = receiveRaftRPC ctx rpcMsg
 
-                return!
-                    agentLoop
-                        { ctx with
-                            State = state
-                            ElectionTimer = electionTimer
-                            HeartbeatTimer = heartbeatTimer }
+                let ctx2 =
+                    { ctx with
+                        State = state
+                        ElectionTimer = electionTimer
+                        HeartbeatTimer = heartbeatTimer }
+
+                let ctx3 =
+                    if state.Config <> ctx.Config then
+                        { ctx2 with Config = state.Config }
+                    else
+                        ctx2
+
+                return! agentLoop ctx3
             | GetState ch ->
                 ch.Reply ctx.State
                 return! agentLoop ctx

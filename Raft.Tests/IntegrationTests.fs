@@ -413,3 +413,210 @@ let ``Leader resolves log inconsistency by decrementing NextIndex and retrying A
     s1 <- Replication.handleAppendEntriesResponse resp_success s1
 
     Assert.Equal(3L, s1.LeaderState.Value.MatchIndex.[2])
+
+[<Fact>]
+let ``Leader appends configuration entry to log and config is updated on commit`` () =
+    let config1 =
+        { NodeId = 1
+          Host = ""
+          Port = 0
+          Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
+          ElectionTimeoutMinMs = 1
+          ElectionTimeoutMaxMs = 2
+          HeartbeatIntervalMs = 1 }
+
+    let config2 =
+        { config1 with
+            NodeId = 2
+            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ] }
+
+    let config3 =
+        { config1 with
+            NodeId = 3
+            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 2; Host = ""; Port = 0 } ] }
+
+    let mutable s1 = State.init config1 None
+    let mutable s2 = State.init config2 None
+    let mutable s3 = State.init config3 None
+
+    // 1. Node 1 becomes leader of Term 1
+    s1 <- Election.startElection s1
+    let rv1 = Election.createRequestVote s1
+    let s2_new, resp2 = Election.handleRequestVote rv1 s2
+    s2 <- s2_new
+    let s3_new, resp3 = Election.handleRequestVote rv1 s3
+    s3 <- s3_new
+    s1 <- Election.handleVoteResponse 2 resp2 s1
+    s1 <- Election.handleVoteResponse 3 resp3 s1
+
+    Assert.Equal(Leader, s1.Role)
+
+    // 2. Add a new peer (Node 4) via configuration change
+    let newPeer = { Id = 4; Host = ""; Port = 0 }
+    let newPeers = newPeer :: s1.Config.Peers
+    s1 <- Replication.appendConfiguration newPeers s1
+
+    Assert.Equal(1, s1.Persistent.Log.Count) // config entry at index 1
+
+    // Verify the config entry has the right prefix
+    let configEntry = s1.Persistent.Log.[1L]
+    Assert.StartsWith(Constants.ConfigCommandPrefix, configEntry.Command)
+
+    // 3. Replicate config entry to followers
+    let ae_to2 = Replication.createAppendEntries 2 s1
+    let ae_to3 = Replication.createAppendEntries 3 s1
+
+    Assert.True ae_to2.IsSome
+    Assert.True ae_to3.IsSome
+
+    let s2_ae, resp2_ae = Replication.handleAppendEntries ae_to2.Value s2
+    s2 <- s2_ae
+    let s3_ae, resp3_ae = Replication.handleAppendEntries ae_to3.Value s3
+    s3 <- s3_ae
+
+    Assert.True resp2_ae.Success
+    Assert.True resp3_ae.Success
+    Assert.Equal(1, s2.Persistent.Log.Count)
+    Assert.Equal(1, s3.Persistent.Log.Count)
+
+    // 4. Leader processes responses and advances commit index
+    s1 <- Replication.handleAppendEntriesResponse resp2_ae s1
+    s1 <- Replication.handleAppendEntriesResponse resp3_ae s1
+    s1 <- Replication.advanceCommitIndex s1
+
+    Assert.Equal(1L, s1.Volatile.CommitIndex)
+
+    // 5. Simulate applyCommitted on Node 1 — config should be updated
+    let mutable appliedCommands = []
+
+    let onApply entry =
+        appliedCommands <- entry.Command :: appliedCommands
+
+    s1 <- NodeAgent.applyCommitted onApply s1
+
+    // Config should now include Node 4
+    Assert.Contains(4, s1.Config.Peers |> List.map (fun p -> p.Id))
+    Assert.Equal(3, s1.Config.Peers.Length)
+
+    // onApply should NOT be called for config entries
+    Assert.Empty appliedCommands
+
+    // 6. Send heartbeat to followers so they also commit the config entry
+    let hb_to2 = Replication.createHeartbeat 2 s1
+    let hb_to3 = Replication.createHeartbeat 3 s1
+    let s2_hb, _ = Replication.handleAppendEntries hb_to2.Value s2
+    s2 <- s2_hb
+    let s3_hb, _ = Replication.handleAppendEntries hb_to3.Value s3
+    s3 <- s3_hb
+
+    // Followers should have commit index 1 now
+    Assert.Equal(1L, s2.Volatile.CommitIndex)
+    Assert.Equal(1L, s3.Volatile.CommitIndex)
+
+    // Simulate applyCommitted on followers
+    s2 <- NodeAgent.applyCommitted (fun _ -> ()) s2
+    s3 <- NodeAgent.applyCommitted (fun _ -> ()) s3
+
+    Assert.Contains(4, s2.Config.Peers |> List.map (fun p -> p.Id))
+    Assert.Contains(4, s3.Config.Peers |> List.map (fun p -> p.Id))
+    Assert.Equal(3, s2.Config.Peers.Length)
+    Assert.Equal(3, s3.Config.Peers.Length)
+
+[<Fact>]
+let ``Leader removes peer via configuration entry and config is updated on commit`` () =
+    let config1 =
+        { NodeId = 1
+          Host = ""
+          Port = 0
+          Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
+          ElectionTimeoutMinMs = 1
+          ElectionTimeoutMaxMs = 2
+          HeartbeatIntervalMs = 1 }
+
+    let config2 =
+        { config1 with
+            NodeId = 2
+            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ] }
+
+    let config3 =
+        { config1 with
+            NodeId = 3
+            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 2; Host = ""; Port = 0 } ] }
+
+    let mutable s1 = State.init config1 None
+    let mutable s2 = State.init config2 None
+
+    // 1. Node 1 becomes leader of Term 1
+    s1 <- Election.startElection s1
+    let rv1 = Election.createRequestVote s1
+    let s2_new, resp2 = Election.handleRequestVote rv1 s2
+    s2 <- s2_new
+    let s3_new, resp3 = Election.handleRequestVote rv1 (State.init config3 None)
+
+    s1 <- Election.handleVoteResponse 2 resp2 s1
+    s1 <- Election.handleVoteResponse 3 resp3 s1
+
+    Assert.Equal(Leader, s1.Role)
+
+    // 2. Remove peer 3 via configuration entry
+    let newPeers = s1.Config.Peers |> List.filter (fun p -> p.Id <> 3)
+    s1 <- Replication.appendConfiguration newPeers s1
+
+    Assert.Equal(1, s1.Persistent.Log.Count) // config entry at index 1
+
+    // 3. Replicate config entry to Node 2
+    let ae_to2 = Replication.createAppendEntries 2 s1
+
+    Assert.True ae_to2.IsSome
+    let s2_ae, resp2_ae = Replication.handleAppendEntries ae_to2.Value s2
+    s2 <- s2_ae
+    Assert.True resp2_ae.Success
+
+    // 4. Leader processes response and advances commit index
+    s1 <- Replication.handleAppendEntriesResponse resp2_ae s1
+    s1 <- Replication.advanceCommitIndex s1
+
+    Assert.Equal(1L, s1.Volatile.CommitIndex)
+    Assert.Equal(0L, s1.Volatile.LastApplied)
+
+    // 5. Send heartbeat to Node 2 to propagate the updated commit index
+    let hb_to2 = Replication.createHeartbeat 2 s1
+    let s2_hb, _ = Replication.handleAppendEntries hb_to2.Value s2
+    s2 <- s2_hb
+
+    // 6. Apply committed entries on both nodes
+    s1 <- NodeAgent.applyCommitted (fun _ -> ()) s1
+    s2 <- NodeAgent.applyCommitted (fun _ -> ()) s2
+
+    Assert.DoesNotContain(3, s1.Config.Peers |> List.map (fun p -> p.Id))
+    Assert.DoesNotContain(3, s2.Config.Peers |> List.map (fun p -> p.Id))
+    Assert.Equal(1, s1.Config.Peers.Length)
+    Assert.Equal(1, s2.Config.Peers.Length)
+
+[<Fact>]
+let ``Non-leader node rejects AddPeer and RemovePeer`` () =
+    let config =
+        { NodeId = 1
+          Host = ""
+          Port = 0
+          Peers = [ { Id = 2; Host = ""; Port = 0 } ]
+          ElectionTimeoutMinMs = 1
+          ElectionTimeoutMaxMs = 2
+          HeartbeatIntervalMs = 1 }
+
+    let state = State.init config None
+
+    let newPeer = { Id = 3; Host = ""; Port = 0 }
+
+    // Simulate non-leader attempting AddPeer via appendConfiguration (should be no-op)
+    let stateAfterAdd =
+        Replication.appendConfiguration [ newPeer; { Id = 2; Host = ""; Port = 0 } ] state
+
+    Assert.Equal(0, stateAfterAdd.Persistent.Log.Count)
+
+    // Simulate non-leader attempting RemovePeer
+    let stateAfterRemove =
+        Replication.appendConfiguration [ { Id = 2; Host = ""; Port = 0 } ] state
+
+    Assert.Equal(0, stateAfterRemove.Persistent.Log.Count)
+    Assert.Equal(1, stateAfterRemove.Config.Peers.Length) // unchanged

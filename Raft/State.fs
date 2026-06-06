@@ -145,5 +145,9 @@ module State =
                     CommitIndex = max state.Volatile.CommitIndex lastAppliedIndex
                     LastApplied = max state.Volatile.LastApplied lastAppliedIndex } }
 
+    let updateConfig peers state =
+        { state with
+            Config = { state.Config with Peers = peers } }
+
     let quorumSize state =
         (List.length state.Config.Peers + 1) / 2 + 1

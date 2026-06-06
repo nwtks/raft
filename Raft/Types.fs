@@ -64,14 +64,10 @@ type InstallSnapshotResponse =
       Success: bool
       LastIncludedIndex: LogIndex }
 
-type RaftMessage =
-    | RequestVoteMsg of RequestVote
-    | RequestVoteResponseMsg of RequestVoteResponse
-    | AppendEntriesMsg of AppendEntries
-    | AppendEntriesResponseMsg of AppendEntriesResponse
-    | InstallSnapshotMsg of InstallSnapshot
-    | InstallSnapshotResponseMsg of InstallSnapshotResponse
-    | ClientCommand of command: string * AsyncReplyChannel<bool> option
+module Constants =
+    /// Prefix for configuration-change log entries.
+    [<Literal>]
+    let ConfigCommandPrefix = "__raft_config:"
 
 // ---------------------------------------------------------------
 // Configuration
@@ -87,3 +83,18 @@ type NodeConfig =
       ElectionTimeoutMinMs: int
       ElectionTimeoutMaxMs: int
       HeartbeatIntervalMs: int }
+
+// ---------------------------------------------------------------
+// Raft Messages
+// ---------------------------------------------------------------
+
+type RaftMessage =
+    | RequestVoteMsg of RequestVote
+    | RequestVoteResponseMsg of RequestVoteResponse
+    | AppendEntriesMsg of AppendEntries
+    | AppendEntriesResponseMsg of AppendEntriesResponse
+    | InstallSnapshotMsg of InstallSnapshot
+    | InstallSnapshotResponseMsg of InstallSnapshotResponse
+    | AddPeer of PeerInfo * AsyncReplyChannel<bool> option
+    | RemovePeer of NodeId * AsyncReplyChannel<bool> option
+    | ClientCommand of command: string * AsyncReplyChannel<bool> option
