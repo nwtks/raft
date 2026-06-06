@@ -99,11 +99,16 @@ let runNode nodeId =
 
         printf "> "
 
+    let onInstallSnapshot (data: string) =
+        lock kvsLock (fun () -> kvs <- System.Text.Json.JsonSerializer.Deserialize<Map<string, string>> data)
+        printfn "\n>>> Snapshot installed with %d entries" (lock kvsLock (fun () -> kvs.Count))
+        printf "> "
+
     let config = createConfig nodeId
     printfn "Starting Node %d on port %d..." nodeId config.Port
     let transport = TcpTransport()
     let persistence = FilePersistence nodeId
-    use node = new RaftNode(config, transport, persistence, onApply)
+    use node = new RaftNode(config, transport, persistence, onApply, onInstallSnapshot)
     System.Threading.Thread.Sleep 2000
     printCommands ()
     inputLoop node kvs kvsLock
