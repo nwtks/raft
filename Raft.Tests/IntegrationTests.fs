@@ -620,3 +620,219 @@ let ``Non-leader node rejects AddPeer and RemovePeer`` () =
 
     Assert.Equal(0, stateAfterRemove.Persistent.Log.Count)
     Assert.Equal(1, stateAfterRemove.Config.Peers.Length) // unchanged
+
+[<Fact>]
+let ``Leader replicates commands to followers who both commit and apply`` () =
+    let config1 =
+        { NodeId = 1
+          Host = ""
+          Port = 0
+          Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
+          ElectionTimeoutMinMs = 1
+          ElectionTimeoutMaxMs = 2
+          HeartbeatIntervalMs = 1 }
+
+    let config2 =
+        { config1 with
+            NodeId = 2
+            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ] }
+
+    let config3 =
+        { config1 with
+            NodeId = 3
+            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 2; Host = ""; Port = 0 } ] }
+
+    let mutable s1 = State.init config1 None
+    let mutable s2 = State.init config2 None
+    let mutable s3 = State.init config3 None
+
+    // 1. Node 1 becomes leader of Term 1
+    s1 <- Election.startElection s1
+    let rv1 = Election.createRequestVote s1
+    let r2 = Election.handleRequestVote rv1 s2
+    s2 <- fst r2
+    let resp2 = snd r2
+    let r3 = Election.handleRequestVote rv1 s3
+    s3 <- fst r3
+    let resp3 = snd r3
+    s1 <- Election.handleVoteResponse 2 resp2 s1
+    s1 <- Election.handleVoteResponse 3 resp3 s1
+    Assert.Equal(Leader, s1.Role)
+
+    // 2. Leader appends two commands
+    s1 <- Replication.appendCommand "cmd1" s1
+    s1 <- Replication.appendCommand "cmd2" s1
+    Assert.Equal(2, s1.Persistent.Log.Count)
+
+    // 3. Replicate to Node 2 (NextIndex[2]=1, so AE sends both cmd1 and cmd2)
+    let ae1 = (Replication.createAppendEntries 2 s1).Value
+    let r4 = Replication.handleAppendEntries ae1 s2
+    s2 <- fst r4
+    let resp_ae = snd r4
+    Assert.True resp_ae.Success
+    Assert.Equal(2L, resp_ae.MatchIndex) // both entries matched
+    s1 <- Replication.handleAppendEntriesResponse resp_ae s1
+    s1 <- Replication.advanceCommitIndex s1
+    // Leader + Peer2 matched index 2 (2/3 = majority), so commit advances to 2
+    Assert.Equal(2L, s1.Volatile.CommitIndex)
+
+    // 4. Replicate to Node 3 (NextIndex[3] still 1, sends all entries)
+    let ae2 = (Replication.createAppendEntries 3 s1).Value
+    let r5 = Replication.handleAppendEntries ae2 s3
+    s3 <- fst r5
+    let resp3_ae = snd r5
+    Assert.True resp3_ae.Success
+    Assert.Equal(2L, resp3_ae.MatchIndex)
+    s1 <- Replication.handleAppendEntriesResponse resp3_ae s1
+    s1 <- Replication.advanceCommitIndex s1
+    // All 3 matched index 2, commit index stays at 2
+    Assert.Equal(2L, s1.Volatile.CommitIndex)
+
+    // 5. Apply committed on leader
+    let applied = ResizeArray<string>()
+    s1 <- NodeAgent.applyCommitted (fun e -> applied.Add e.Command) s1
+    Assert.Equal(2, applied.Count)
+    Assert.Contains("cmd1", applied)
+    Assert.Contains("cmd2", applied)
+    Assert.Equal(2L, s1.Volatile.LastApplied)
+
+    // 6. Send heartbeat to followers so they commit too
+    let hb_to2 = (Replication.createHeartbeat 2 s1).Value
+    let hb_to3 = (Replication.createHeartbeat 3 s1).Value
+    let r6 = Replication.handleAppendEntries hb_to2 s2
+    s2 <- fst r6
+    let r7 = Replication.handleAppendEntries hb_to3 s3
+    s3 <- fst r7
+
+    Assert.Equal(2L, s2.Volatile.CommitIndex)
+    Assert.Equal(2L, s3.Volatile.CommitIndex)
+
+    s2 <- NodeAgent.applyCommitted (fun _ -> ()) s2
+    s3 <- NodeAgent.applyCommitted (fun _ -> ()) s3
+    Assert.Equal(2L, s2.Volatile.LastApplied)
+    Assert.Equal(2L, s3.Volatile.LastApplied)
+
+[<Fact>]
+let ``takeSnapshot on leader trims log and snapshot is installable on follower`` () =
+    let config1 =
+        { NodeId = 1
+          Host = ""
+          Port = 0
+          Peers = [ { Id = 2; Host = ""; Port = 0 } ]
+          ElectionTimeoutMinMs = 1
+          ElectionTimeoutMaxMs = 2
+          HeartbeatIntervalMs = 1 }
+
+    let config2 =
+        { NodeId = 2
+          Host = ""
+          Port = 0
+          Peers = [ { Id = 1; Host = ""; Port = 0 } ]
+          ElectionTimeoutMinMs = 1
+          ElectionTimeoutMaxMs = 2
+          HeartbeatIntervalMs = 1 }
+
+    let mutable s1 = State.init config1 None
+    let mutable s2 = State.init config2 None
+
+    // 1. Node 1 becomes leader of Term 1
+    s1 <- Election.startElection s1
+    let rv1 = Election.createRequestVote s1
+    let r2 = Election.handleRequestVote rv1 s2
+    s2 <- fst r2
+    let resp2 = snd r2
+    s1 <- Election.handleVoteResponse 2 resp2 s1
+    Assert.Equal(Leader, s1.Role)
+
+    // 2. Append and commit 3 commands
+    for cmd in [ "a"; "b"; "c" ] do
+        s1 <- Replication.appendCommand cmd s1
+        let ae = (Replication.createAppendEntries 2 s1).Value
+        let r = Replication.handleAppendEntries ae s2
+        s2 <- fst r
+        let resp_ae = snd r
+        s1 <- Replication.handleAppendEntriesResponse resp_ae s1
+        s1 <- Replication.advanceCommitIndex s1
+
+    Assert.Equal(3L, s1.Volatile.CommitIndex)
+
+    // 3. Apply committed on leader
+    s1 <- NodeAgent.applyCommitted (fun _ -> ()) s1
+    Assert.Equal(3L, s1.Volatile.LastApplied)
+
+    // 4. Take snapshot at index 2 on leader
+    s1 <- State.takeSnapshot 2L 1L "snap-data" s1
+    Assert.True s1.Persistent.Snapshot.IsSome
+    Assert.Equal(2L, s1.Persistent.Snapshot.Value.LastIncludedIndex)
+    // Log should be trimmed: entries at 1 and 2 removed, sentinel at 2, entry 3 remains
+    Assert.False(s1.Persistent.Log.ContainsKey 1L)
+    Assert.True(s1.Persistent.Log.ContainsKey 2L) // sentinel
+    Assert.True(s1.Persistent.Log.ContainsKey 3L) // not trimmed
+
+    // 5. Now simulate InstallSnapshot from leader (1) to follower (2)
+    let snapMsg: InstallSnapshot =
+        { LeaderTerm = s1.Persistent.CurrentTerm
+          LeaderId = 1
+          LastIncludedIndex = s1.Persistent.Snapshot.Value.LastIncludedIndex
+          LastIncludedTerm = s1.Persistent.Snapshot.Value.LastIncludedTerm
+          Data = s1.Persistent.Snapshot.Value.StateMachineData }
+
+    let r3 = Replication.handleInstallSnapshot snapMsg s2
+    s2 <- fst r3
+    let snapResp = snd r3
+    Assert.True snapResp.Success
+    Assert.Equal(2L, snapResp.LastIncludedIndex)
+
+    // Follower should have the snapshot installed and log trimmed
+    Assert.True s2.Persistent.Snapshot.IsSome
+    Assert.Equal("snap-data", s2.Persistent.Snapshot.Value.StateMachineData)
+    Assert.False(s2.Persistent.Log.ContainsKey 1L)
+    Assert.Equal("", s2.Persistent.Log.[2L].Command) // sentinel
+
+    // 6. Leader handles the response
+    let s1_after_snapResp = Replication.handleInstallSnapshotResponse snapResp s1
+    Assert.Equal(2L, s1_after_snapResp.LeaderState.Value.MatchIndex.[2])
+    Assert.Equal(3L, s1_after_snapResp.LeaderState.Value.NextIndex.[2])
+
+[<Fact>]
+let ``broadcastAppendEntries falls back to InstallSnapshot when follower is behind snapshot`` () =
+    // This simulates the scenario in NodeBroadcaster.broadcastAppendEntries
+    // where createAppendEntries returns None (follower behind snapshot)
+    // and createInstallSnapshot returns Some
+
+    let log = logFromList [ { Index = 5L; Term = 2L; Command = "d" } ]
+
+    let ls: LeaderState =
+        { NextIndex = Map.ofList [ 2, 1L ]
+          MatchIndex = Map.ofList [ 2, 0L ] }
+
+    let state =
+        { State.init dummyConfig None with
+            Role = Leader
+            Persistent =
+                { CurrentTerm = 2L
+                  VotedFor = None
+                  Log = log
+                  Snapshot =
+                    Some
+                        { LastIncludedIndex = 3L
+                          LastIncludedTerm = 1L
+                          StateMachineData = "snap" } }
+            LeaderState = Some ls
+            Volatile = { CommitIndex = 3L; LastApplied = 3L } }
+
+    // createAppendEntries should return None (prevLogIndex=0 < snap.LastIncludedIndex=3)
+    let ae = Replication.createAppendEntries 2 state
+    Assert.True ae.IsNone
+
+    // createInstallSnapshot should return Some (nextIdx=1 <= 3+1)
+    let snap = Replication.createInstallSnapshot 2 state
+    Assert.True snap.IsSome
+    Assert.Equal(3L, snap.Value.LastIncludedIndex)
+    Assert.Equal("snap", snap.Value.Data)
+
+[<Fact>]
+let ``createAppendEntries returns None when leader has no LeaderState`` () =
+    let state = State.init dummyConfig None
+    let ae = Replication.createAppendEntries 2 state
+    Assert.True ae.IsNone

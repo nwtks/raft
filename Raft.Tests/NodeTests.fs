@@ -344,3 +344,243 @@ let ``RaftNode.Dispose does not throw`` () =
 
         Assert.Null ex
     }
+
+[<Fact>]
+let ``Leader RaftNode.AddPeer appends configuration entry and broadcasts to all peers`` () =
+    task {
+        let config =
+            { configWithPeers 1 16009 with
+                ElectionTimeoutMinMs = 100
+                ElectionTimeoutMaxMs = 200 }
+
+        let transport = MockTransport()
+        let persistence = MockPersistence()
+        let node = new RaftNode(config, transport, persistence, ignore)
+
+        node.TriggerElectionTimeout()
+        node.GetState() |> ignore
+        let term = (node.GetState()).Persistent.CurrentTerm
+
+        transport.ReceiveMessage(
+            RequestVoteResponseMsg
+                { VoterId = 2
+                  VoterTerm = term
+                  VoteGranted = true }
+        )
+
+        node.GetState() |> ignore
+
+        let state = node.GetState()
+        Assert.Equal(Leader, state.Role)
+
+        transport.Messages.Clear()
+
+        let newPeer =
+            { Id = 4
+              Host = "127.0.0.1"
+              Port = 16010 }
+
+        let success = node.AddPeer newPeer
+        Assert.True success
+
+        node.GetState() |> ignore
+
+        let finalState = node.GetState()
+        Assert.Equal(1, finalState.Persistent.Log.Count)
+        Assert.StartsWith(Constants.ConfigCommandPrefix, (Map.find 1L finalState.Persistent.Log).Command)
+
+        Assert.Contains(transport.Messages, fun (p, _) -> p.Id = 2)
+        Assert.Contains(transport.Messages, fun (p, _) -> p.Id = 3)
+    }
+
+[<Fact>]
+let ``Leader RaftNode.RemovePeer appends configuration entry and broadcasts`` () =
+    task {
+        let config =
+            { configWithPeers 1 16011 with
+                ElectionTimeoutMinMs = 100
+                ElectionTimeoutMaxMs = 200 }
+
+        let transport = MockTransport()
+        let persistence = MockPersistence()
+        let node = new RaftNode(config, transport, persistence, ignore)
+
+        node.TriggerElectionTimeout()
+        node.GetState() |> ignore
+        let term = (node.GetState()).Persistent.CurrentTerm
+
+        transport.ReceiveMessage(
+            RequestVoteResponseMsg
+                { VoterId = 2
+                  VoterTerm = term
+                  VoteGranted = true }
+        )
+
+        node.GetState() |> ignore
+
+        let state = node.GetState()
+        Assert.Equal(Leader, state.Role)
+
+        transport.Messages.Clear()
+
+        let success = node.RemovePeer 3
+        Assert.True success
+
+        node.GetState() |> ignore
+
+        let finalState = node.GetState()
+        Assert.Equal(1, finalState.Persistent.Log.Count)
+        Assert.StartsWith(Constants.ConfigCommandPrefix, (Map.find 1L finalState.Persistent.Log).Command)
+
+        Assert.Contains(transport.Messages, fun (p, _) -> p.Id = 2)
+    }
+
+[<Fact>]
+let ``Non-leader RaftNode.AddPeer returns false`` () =
+    task {
+        let config = configForNode 1 16012
+        let transport = MockTransport()
+        let persistence = MockPersistence()
+        let node = new RaftNode(config, transport, persistence, ignore)
+
+        let state = node.GetState()
+        Assert.Equal(Follower, state.Role)
+
+        let newPeer =
+            { Id = 2
+              Host = "127.0.0.1"
+              Port = 16013 }
+
+        let success = node.AddPeer newPeer
+        Assert.False success
+    }
+
+[<Fact>]
+let ``Non-leader RaftNode.RemovePeer returns false`` () =
+    task {
+        let config = configForNode 1 16014
+        let transport = MockTransport()
+        let persistence = MockPersistence()
+        let node = new RaftNode(config, transport, persistence, ignore)
+
+        let state = node.GetState()
+        Assert.Equal(Follower, state.Role)
+
+        let success = node.RemovePeer 2
+        Assert.False success
+    }
+
+[<Fact>]
+let ``RaftNode.SubmitTakeSnapshot creates snapshot through actor`` () =
+    task {
+        let config = configForNode 1 16015
+        let transport = MockTransport()
+        let persistence = MockPersistence()
+        let node = new RaftNode(config, transport, persistence, ignore)
+
+        node.TriggerElectionTimeout()
+        Assert.Equal(Leader, (node.GetState()).Role)
+
+        node.SubmitCommand "test-command" |> Assert.True
+
+        node.SubmitTakeSnapshot "snapshot-data"
+
+        let state = node.GetState()
+        Assert.True state.Persistent.Snapshot.IsSome
+        Assert.Equal("snapshot-data", state.Persistent.Snapshot.Value.StateMachineData)
+        Assert.True(state.Persistent.Log.ContainsKey 1L)
+        Assert.Equal("test-command", state.Persistent.Log.[1L].Command)
+    }
+
+[<Fact>]
+let ``RaftNode.SubmitTakeSnapshot with committed entries trims log`` () =
+    task {
+        let config = configWithPeers 1 16016
+        let transport = MockTransport()
+        let persistence = MockPersistence()
+        let applied = ResizeArray<LogEntry>()
+        let node = new RaftNode(config, transport, persistence, (fun e -> applied.Add e))
+
+        node.TriggerElectionTimeout()
+        let term = (node.GetState()).Persistent.CurrentTerm
+
+        transport.ReceiveMessage(
+            RequestVoteResponseMsg
+                { VoterId = 2
+                  VoterTerm = term
+                  VoteGranted = true }
+        )
+
+        transport.ReceiveMessage(
+            RequestVoteResponseMsg
+                { VoterId = 3
+                  VoterTerm = term
+                  VoteGranted = true }
+        )
+
+        Assert.Equal(Leader, (node.GetState()).Role)
+
+        node.SubmitCommand "cmd1" |> Assert.True
+
+        transport.ReceiveMessage(
+            AppendEntriesResponseMsg
+                { FollowerTerm = term
+                  Success = true
+                  MatchIndex = 1L
+                  FollowerId = 2
+                  ConflictTerm = 0L
+                  ConflictIndex = 0L }
+        )
+
+        transport.ReceiveMessage(
+            AppendEntriesResponseMsg
+                { FollowerTerm = term
+                  Success = true
+                  MatchIndex = 1L
+                  FollowerId = 3
+                  ConflictTerm = 0L
+                  ConflictIndex = 0L }
+        )
+
+        let s = node.GetState()
+        Assert.Equal(1L, s.Volatile.LastApplied)
+        Assert.Equal(1, applied.Count)
+
+        node.SubmitCommand "cmd2" |> Assert.True
+        Assert.Equal(1, applied.Count)
+
+        transport.ReceiveMessage(
+            AppendEntriesResponseMsg
+                { FollowerTerm = term
+                  Success = true
+                  MatchIndex = 2L
+                  FollowerId = 2
+                  ConflictTerm = 0L
+                  ConflictIndex = 0L }
+        )
+
+        transport.ReceiveMessage(
+            AppendEntriesResponseMsg
+                { FollowerTerm = term
+                  Success = true
+                  MatchIndex = 2L
+                  FollowerId = 3
+                  ConflictTerm = 0L
+                  ConflictIndex = 0L }
+        )
+
+        let stateWithCommitted = node.GetState()
+        Assert.Equal(2, applied.Count)
+        Assert.Equal(2L, stateWithCommitted.Volatile.LastApplied)
+
+        node.SubmitTakeSnapshot "snap-data"
+
+        let state = node.GetState()
+        Assert.True state.Persistent.Snapshot.IsSome
+        Assert.Equal(2L, state.Persistent.Snapshot.Value.LastIncludedIndex)
+        Assert.Equal("snap-data", state.Persistent.Snapshot.Value.StateMachineData)
+
+        Assert.False(state.Persistent.Log.ContainsKey 1L)
+        Assert.True(state.Persistent.Log.ContainsKey 2L)
+        Assert.Equal("", state.Persistent.Log.[2L].Command)
+    }

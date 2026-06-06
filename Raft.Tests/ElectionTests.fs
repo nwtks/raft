@@ -106,6 +106,46 @@ let ``Election.handleRequestVote rejects when candidate log is behind`` () =
     Assert.False resp.VoteGranted
 
 [<Fact>]
+let ``Election.handleRequestVote rejects when already voted for different candidate in same term`` () =
+    let state =
+        { State.init dummyConfig None with
+            Persistent =
+                { CurrentTerm = 1L
+                  VotedFor = Some 3
+                  Log = Map.empty
+                  Snapshot = None } }
+
+    let rv =
+        { CandidateTerm = 1L
+          CandidateId = 2
+          LastLogIndex = 0L
+          LastLogTerm = 0L }
+
+    let _, resp = Election.handleRequestVote rv state
+    Assert.False resp.VoteGranted
+    Assert.Equal(1L, resp.VoterTerm)
+
+[<Fact>]
+let ``Election.handleRequestVote grants vote when candidate term equals current term and not voted`` () =
+    let state =
+        { State.init dummyConfig None with
+            Persistent =
+                { CurrentTerm = 3L
+                  VotedFor = None
+                  Log = Map.empty
+                  Snapshot = None } }
+
+    let rv =
+        { CandidateTerm = 3L
+          CandidateId = 2
+          LastLogIndex = 0L
+          LastLogTerm = 0L }
+
+    let _, resp = Election.handleRequestVote rv state
+    Assert.True resp.VoteGranted
+    Assert.Equal(3L, resp.VoterTerm)
+
+[<Fact>]
 let ``Election.handleVoteResponse updates current term when response carries a higher term`` () =
     let state = Election.startElection (State.init dummyConfig None)
 
@@ -189,3 +229,19 @@ let ``Election.handleVoteResponse ignores denied vote when staying Candidate wit
     let newState = Election.handleVoteResponse 2 resp state
     Assert.Equal(Candidate, newState.Role)
     Assert.Equal(1, newState.VotesReceived.Count)
+
+[<Fact>]
+let ``Election.handleVoteResponse ignores duplicate vote from already-voted node`` () =
+    let state = Election.startElection (State.init dummyConfig None)
+
+    let resp =
+        { VoterId = 2
+          VoterTerm = 1L
+          VoteGranted = true }
+
+    let afterFirst = Election.handleVoteResponse 2 resp state
+    Assert.Equal(Leader, afterFirst.Role)
+
+    let afterDup = Election.handleVoteResponse 2 resp afterFirst
+    Assert.Equal(Leader, afterDup.Role)
+    Assert.Equal(afterFirst, afterDup)

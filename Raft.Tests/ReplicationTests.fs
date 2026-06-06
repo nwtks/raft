@@ -108,6 +108,58 @@ let ``Replication.handleAppendEntries rejects when PrevLogIndex exceeds follower
     Assert.Equal(2L, resp.ConflictIndex)
 
 [<Fact>]
+let ``Replication.handleAppendEntries with PrevLogIndex > log last index returns ConflictIndex = lastIndex + 1`` () =
+    let log = logFromList [ { Index = 1L; Term = 1L; Command = "a" } ]
+
+    let state =
+        { State.init dummyConfig None with
+            Persistent =
+                { CurrentTerm = 1L
+                  VotedFor = None
+                  Log = log
+                  Snapshot = None }
+            CurrentLeader = Some 2 }
+
+    let ae =
+        { LeaderTerm = 1L
+          LeaderId = 2
+          PrevLogIndex = 5L
+          PrevLogTerm = 0L
+          Entries = []
+          LeaderCommit = 0L }
+
+    let _, resp = Replication.handleAppendEntries ae state
+    Assert.False resp.Success
+    Assert.Equal(0L, resp.ConflictTerm)
+    Assert.Equal(2L, resp.ConflictIndex)
+
+[<Fact>]
+let ``Replication.handleAppendEntries with conflict at log index 1 triggers firstIdx base case`` () =
+    let log = logFromList [ { Index = 1L; Term = 1L; Command = "a" } ]
+
+    let state =
+        { State.init dummyConfig None with
+            Persistent =
+                { CurrentTerm = 2L
+                  VotedFor = None
+                  Log = log
+                  Snapshot = None }
+            CurrentLeader = Some 3 }
+
+    let ae =
+        { LeaderTerm = 2L
+          LeaderId = 3
+          PrevLogIndex = 1L
+          PrevLogTerm = 2L
+          Entries = []
+          LeaderCommit = 0L }
+
+    let _, resp = Replication.handleAppendEntries ae state
+    Assert.False resp.Success
+    Assert.Equal(1L, resp.ConflictTerm)
+    Assert.Equal(1L, resp.ConflictIndex)
+
+[<Fact>]
 let ``Replication.handleAppendEntriesResponse updates term when response contains higher term`` () =
     let state = State.init dummyConfig None
 
@@ -224,6 +276,291 @@ let ``Replication.handleAppendEntriesResponse uses ConflictIndex when leader has
     Assert.Equal(3L, newState.LeaderState.Value.NextIndex.[2])
 
 [<Fact>]
+let ``Replication.handleAppendEntriesResponse with success updates match and next indices`` () =
+    let ls: LeaderState =
+        { NextIndex = Map.ofList [ 2, 5L ]
+          MatchIndex = Map.ofList [ 2, 0L ] }
+
+    let state =
+        { State.init dummyConfig None with
+            Role = Leader
+            Persistent =
+                { CurrentTerm = 1L
+                  VotedFor = None
+                  Log = Map.empty
+                  Snapshot = None }
+            LeaderState = Some ls }
+
+    let resp =
+        { FollowerTerm = 1L
+          Success = true
+          MatchIndex = 4L
+          FollowerId = 2
+          ConflictTerm = 0L
+          ConflictIndex = 0L }
+
+    let newState = Replication.handleAppendEntriesResponse resp state
+    Assert.Equal(4L, newState.LeaderState.Value.MatchIndex.[2])
+    Assert.Equal(5L, newState.LeaderState.Value.NextIndex.[2])
+
+[<Fact>]
+let ``Replication.handleAppendEntriesResponse with ConflictTerm decrements NextIndex appropriately`` () =
+    let log = logFromList [ { Index = 3L; Term = 1L; Command = "x" } ]
+
+    let ls: LeaderState =
+        { NextIndex = Map.ofList [ 2, 5L ]
+          MatchIndex = Map.ofList [ 2, 0L ] }
+
+    let state =
+        { State.init dummyConfig None with
+            Role = Leader
+            Persistent =
+                { CurrentTerm = 1L
+                  VotedFor = None
+                  Log = log
+                  Snapshot = None }
+            LeaderState = Some ls }
+
+    let resp =
+        { FollowerTerm = 1L
+          Success = false
+          MatchIndex = 0L
+          FollowerId = 2
+          ConflictTerm = 1L
+          ConflictIndex = 4L }
+
+    let newState = Replication.handleAppendEntriesResponse resp state
+    Assert.Equal(3L, newState.LeaderState.Value.NextIndex.[2])
+
+[<Fact>]
+let ``Replication.handleAppendEntriesResponse with ConflictTerm not found in log uses ConflictIndex`` () =
+    let log = logFromList [ { Index = 1L; Term = 1L; Command = "a" } ]
+
+    let ls: LeaderState =
+        { NextIndex = Map.ofList [ 2, 5L ]
+          MatchIndex = Map.ofList [ 2, 0L ] }
+
+    let state =
+        { State.init dummyConfig None with
+            Role = Leader
+            Persistent =
+                { CurrentTerm = 2L
+                  VotedFor = None
+                  Log = log
+                  Snapshot = None }
+            LeaderState = Some ls }
+
+    let resp =
+        { FollowerTerm = 2L
+          Success = false
+          MatchIndex = 0L
+          FollowerId = 2
+          ConflictTerm = 99L
+          ConflictIndex = 3L }
+
+    let newState = Replication.handleAppendEntriesResponse resp state
+    Assert.Equal(3L, newState.LeaderState.Value.NextIndex.[2])
+
+[<Fact>]
+let ``Replication.handleAppendEntriesResponse with ConflictTerm=0 uses ConflictIndex`` () =
+    let ls: LeaderState =
+        { NextIndex = Map.ofList [ 2, 5L ]
+          MatchIndex = Map.ofList [ 2, 0L ] }
+
+    let state =
+        { State.init dummyConfig None with
+            Role = Leader
+            Persistent =
+                { CurrentTerm = 1L
+                  VotedFor = None
+                  Log = Map.empty
+                  Snapshot = None }
+            LeaderState = Some ls }
+
+    let resp =
+        { FollowerTerm = 1L
+          Success = false
+          MatchIndex = 0L
+          FollowerId = 2
+          ConflictTerm = 0L
+          ConflictIndex = 3L }
+
+    let newState = Replication.handleAppendEntriesResponse resp state
+    Assert.Equal(3L, newState.LeaderState.Value.NextIndex.[2])
+
+[<Fact>]
+let ``Replication.createInstallSnapshot returns None when node is not Leader`` () =
+    let state = State.init dummyConfig None
+    Assert.True(Replication.createInstallSnapshot 2 state |> Option.isNone)
+
+[<Fact>]
+let ``Replication.createInstallSnapshot returns None when no snapshot exists`` () =
+    let state = State.initLeaderState (State.init dummyConfig None)
+    Assert.True(Replication.createInstallSnapshot 2 state |> Option.isNone)
+
+[<Fact>]
+let ``Replication.createInstallSnapshot returns Some when snapshot exists and follower needs it`` () =
+    let log = logFromList [ { Index = 4L; Term = 1L; Command = "c" } ]
+
+    let ls: LeaderState =
+        { NextIndex = Map.ofList [ 2, 1L ]
+          MatchIndex = Map.ofList [ 2, 0L ] }
+
+    let state =
+        { State.init dummyConfig None with
+            Role = Leader
+            Persistent =
+                { CurrentTerm = 1L
+                  VotedFor = None
+                  Log = log
+                  Snapshot =
+                    Some
+                        { LastIncludedIndex = 3L
+                          LastIncludedTerm = 1L
+                          StateMachineData = "snap" } }
+            LeaderState = Some ls }
+
+    let snap = Replication.createInstallSnapshot 2 state
+    Assert.True snap.IsSome
+    Assert.Equal(3L, snap.Value.LastIncludedIndex)
+    Assert.Equal(1L, snap.Value.LastIncludedTerm)
+    Assert.Equal("snap", snap.Value.Data)
+
+[<Fact>]
+let ``Replication.createInstallSnapshot returns None when snapshot is behind follower's next index`` () =
+    let log = logFromList [ { Index = 5L; Term = 1L; Command = "c" } ]
+
+    let ls: LeaderState =
+        { NextIndex = Map.ofList [ 2, 10L ]
+          MatchIndex = Map.ofList [ 2, 9L ] }
+
+    let state =
+        { State.init dummyConfig None with
+            Role = Leader
+            Persistent =
+                { CurrentTerm = 1L
+                  VotedFor = None
+                  Log = log
+                  Snapshot =
+                    Some
+                        { LastIncludedIndex = 5L
+                          LastIncludedTerm = 1L
+                          StateMachineData = "snap" } }
+            LeaderState = Some ls }
+
+    let snap = Replication.createInstallSnapshot 2 state
+    Assert.True snap.IsNone
+
+[<Fact>]
+let ``Replication.createInstallSnapshot returns None when there is no snapshot`` () =
+    let state = State.initLeaderState (State.init dummyConfig None)
+    let snap = Replication.createInstallSnapshot 2 state
+    Assert.True snap.IsNone
+
+[<Fact>]
+let ``Replication.handleInstallSnapshot rejects when leader term is lower`` () =
+    let state =
+        { State.init dummyConfig None with
+            Persistent =
+                { CurrentTerm = 3L
+                  VotedFor = None
+                  Log = Map.empty
+                  Snapshot = None } }
+
+    let snap =
+        { LeaderTerm = 2L
+          LeaderId = 5
+          LastIncludedIndex = 10L
+          LastIncludedTerm = 2L
+          Data = "snap-data" }
+
+    let newState, resp = Replication.handleInstallSnapshot snap state
+    Assert.False resp.Success
+    Assert.Equal(0L, resp.LastIncludedIndex)
+    Assert.Equal(Follower, newState.Role)
+
+[<Fact>]
+let ``Replication.handleInstallSnapshot installs snapshot and trims log`` () =
+    let state =
+        { State.init dummyConfig None with
+            Persistent =
+                { CurrentTerm = 1L
+                  VotedFor = None
+                  Log =
+                    logFromList
+                        [ { Index = 1L; Term = 1L; Command = "a" }
+                          { Index = 2L; Term = 1L; Command = "b" }
+                          { Index = 3L; Term = 1L; Command = "c" } ]
+                  Snapshot = None } }
+
+    let snap =
+        { LeaderTerm = 2L
+          LeaderId = 3
+          LastIncludedIndex = 2L
+          LastIncludedTerm = 1L
+          Data = "snap-data" }
+
+    let newState, resp = Replication.handleInstallSnapshot snap state
+
+    Assert.True resp.Success
+    Assert.Equal(2L, resp.LastIncludedIndex)
+    Assert.Equal(2L, newState.Persistent.CurrentTerm)
+    Assert.Equal(Some 3, newState.CurrentLeader)
+
+    Assert.Equal(2, newState.Persistent.Log.Count)
+    Assert.True(newState.Persistent.Log.ContainsKey 2L)
+    Assert.True(newState.Persistent.Log.ContainsKey 3L)
+    Assert.Equal("", newState.Persistent.Log.[2L].Command)
+    Assert.Equal("c", newState.Persistent.Log.[3L].Command)
+
+    Assert.True newState.Persistent.Snapshot.IsSome
+    Assert.Equal(2L, newState.Persistent.Snapshot.Value.LastIncludedIndex)
+    Assert.Equal("snap-data", newState.Persistent.Snapshot.Value.StateMachineData)
+
+    Assert.Equal(2L, newState.Volatile.CommitIndex)
+    Assert.Equal(2L, newState.Volatile.LastApplied)
+
+[<Fact>]
+let ``Replication.handleInstallSnapshotResponse updates match and next index on success`` () =
+    let ls: LeaderState =
+        { NextIndex = Map.ofList [ 2, 1L ]
+          MatchIndex = Map.ofList [ 2, 0L ] }
+
+    let state =
+        { State.init dummyConfig None with
+            Role = Leader
+            Persistent =
+                { CurrentTerm = 2L
+                  VotedFor = None
+                  Log = Map.empty
+                  Snapshot = None }
+            LeaderState = Some ls }
+
+    let resp =
+        { FollowerTerm = 2L
+          FollowerId = 2
+          Success = true
+          LastIncludedIndex = 10L }
+
+    let newState = Replication.handleInstallSnapshotResponse resp state
+
+    Assert.Equal(10L, newState.LeaderState.Value.MatchIndex.[2])
+    Assert.Equal(11L, newState.LeaderState.Value.NextIndex.[2])
+
+[<Fact>]
+let ``Replication.handleInstallSnapshotResponse updates term when response has higher term`` () =
+    let state = State.init dummyConfig None
+
+    let resp =
+        { FollowerTerm = 99L
+          FollowerId = 2
+          Success = false
+          LastIncludedIndex = 0L }
+
+    let newState = Replication.handleInstallSnapshotResponse resp state
+    Assert.Equal(99L, newState.Persistent.CurrentTerm)
+
+[<Fact>]
 let ``Replication.advanceCommitIndex advances commit index when majority of peers have matched`` () =
     let leaderState =
         { NextIndex = Map.ofList [ 2, 2L; 3, 1L ]
@@ -273,7 +610,39 @@ let ``Replication.advanceCommitIndex does not advance when term does not match c
     Assert.Equal(0L, newState.Volatile.CommitIndex)
 
 [<Fact>]
+let ``Replication.appendConfiguration appends config entry when leader`` () =
+    let state = State.initLeaderState (State.init dummyConfig None)
+    let newPeers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 4; Host = ""; Port = 0 } ]
+    let newState = Replication.appendConfiguration newPeers state
+
+    Assert.Equal(1, newState.Persistent.Log.Count)
+    let entry = newState.Persistent.Log.[1L]
+    Assert.StartsWith(Constants.ConfigCommandPrefix, entry.Command)
+
+    let json = entry.Command.Substring(Constants.ConfigCommandPrefix.Length)
+    let deserialized = System.Text.Json.JsonSerializer.Deserialize<PeerInfo list> json
+    Assert.Equal(2, deserialized.Length)
+    Assert.Contains(4, deserialized |> List.map (fun p -> p.Id))
+
+[<Fact>]
+let ``Replication.appendConfiguration discards when node is not Leader`` () =
+    let state = State.init dummyConfig None
+    let newPeers = [ { Id = 2; Host = ""; Port = 0 } ]
+    let newState = Replication.appendConfiguration newPeers state
+    Assert.True(Map.isEmpty newState.Persistent.Log)
+
+[<Fact>]
 let ``Replication.appendCommand discards command when node is not Leader`` () =
     let state = State.init dummyConfig None
     let newState = Replication.appendCommand "should fail" state
     Assert.True(Map.isEmpty newState.Persistent.Log)
+
+[<Fact>]
+let ``Replication.appendCommand appends entry when node is Leader`` () =
+    let state = State.initLeaderState (State.init dummyConfig None)
+    let newState = Replication.appendCommand "put x 42" state
+
+    Assert.Equal(1, newState.Persistent.Log.Count)
+    Assert.Equal(1L, (Map.find 1L newState.Persistent.Log).Index)
+    Assert.Equal(0L, (Map.find 1L newState.Persistent.Log).Term)
+    Assert.Equal("put x 42", (Map.find 1L newState.Persistent.Log).Command)

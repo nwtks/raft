@@ -16,6 +16,11 @@ let ``Log.empty returns lastIndex 0 and lastTerm 0`` () =
     Assert.Equal(0L, Log.lastTerm log)
 
 [<Fact>]
+let ``Log.getEntry returns None for missing index`` () =
+    let log = logFromList [ createEntry 1L 1L "a" ]
+    Assert.True(Log.getEntry 99L log |> Option.isNone)
+
+[<Fact>]
 let ``Log.termAt returns 0 for missing index`` () =
     let log = logFromList [ createEntry 1L 1L "a" ]
     Assert.Equal(0L, Log.termAt 2L log)
@@ -25,6 +30,14 @@ let ``Log.lastIndexOfTerm returns None when term not found`` () =
     let log = logFromList [ createEntry 1L 1L "a"; createEntry 2L 1L "b" ]
     let result = Log.lastIndexOfTerm 2L log
     Assert.True result.IsNone
+
+[<Fact>]
+let ``Log.lastIndexOfTerm returns correct index when term is found`` () =
+    let log =
+        logFromList [ createEntry 1L 1L "a"; createEntry 2L 1L "b"; createEntry 3L 2L "c" ]
+
+    let result = Log.lastIndexOfTerm 1L log
+    Assert.Equal(Some 2L, result)
 
 [<Fact>]
 let ``Log.append adds entry and returns incremented lastIndex`` () =
@@ -93,3 +106,50 @@ let ``Log.mergeEntries with exact matching entries does not duplicate`` () =
     let newEntries = [ createEntry 1L 1L "a"; createEntry 2L 1L "b" ]
     let merged = Log.mergeEntries newEntries log
     Assert.Equal(2, merged.Count)
+
+[<Fact>]
+let ``Log.mergeEntries with conflict at first entry truncates everything`` () =
+    let log =
+        logFromList
+            [ createEntry 1L 1L "old_a"
+              createEntry 2L 1L "old_b"
+              createEntry 3L 2L "old_c" ]
+
+    let newEntries = [ createEntry 1L 3L "new_a"; createEntry 2L 3L "new_b" ]
+    let merged = Log.mergeEntries newEntries log
+
+    Assert.Equal(2, merged.Count)
+    Assert.Equal(3L, merged.[1L].Term)
+    Assert.Equal("new_a", merged.[1L].Command)
+    Assert.Equal("new_b", merged.[2L].Command)
+
+[<Fact>]
+let ``Log.trim removes entries at or below lastIncludedIndex and adds sentinel`` () =
+    let log =
+        logFromList
+            [ createEntry 1L 1L "a"
+              createEntry 2L 1L "b"
+              createEntry 3L 2L "c"
+              createEntry 4L 2L "d" ]
+
+    let trimmed = Log.trim 2L 1L log
+
+    Assert.Equal(3, trimmed.Count)
+
+    Assert.True(trimmed.ContainsKey 2L)
+    Assert.Equal("", trimmed.[2L].Command)
+    Assert.Equal(1L, trimmed.[2L].Term)
+
+    Assert.True(trimmed.ContainsKey 3L)
+    Assert.Equal("c", trimmed.[3L].Command)
+    Assert.True(trimmed.ContainsKey 4L)
+    Assert.Equal("d", trimmed.[4L].Command)
+
+    Assert.False(trimmed.ContainsKey 1L)
+
+[<Fact>]
+let ``Log.trim with empty log adds only sentinel`` () =
+    let trimmed = Log.trim 1L 1L Map.empty
+    Assert.Equal(1, trimmed.Count)
+    Assert.Equal(1L, trimmed.[1L].Index)
+    Assert.Equal("", trimmed.[1L].Command)
