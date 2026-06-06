@@ -132,4 +132,9 @@ module NodeAgent =
             | GetState ch ->
                 ch.Reply ctx.State
                 return! agentLoop ctx
+            | Shutdown ch ->
+                NodeTimer.stopTimer ctx.ElectionTimer
+                NodeTimer.stopTimer ctx.HeartbeatTimer
+                ctx.CancellationTokenSource.Cancel()
+                ch.Reply()
         }

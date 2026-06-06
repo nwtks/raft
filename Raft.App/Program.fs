@@ -100,7 +100,7 @@ let runNode nodeId =
     printfn "Starting Node %d on port %d..." nodeId config.Port
     let transport = TcpTransport()
     let persistence = FilePersistence nodeId
-    let node = RaftNode(config, transport, persistence, onApply)
+    use node = new RaftNode(config, transport, persistence, onApply)
     System.Threading.Thread.Sleep 2000
     printCommands ()
     inputLoop node kvs

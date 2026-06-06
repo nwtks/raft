@@ -5,6 +5,7 @@ type NodeMessage =
     | ElectionTimeout
     | HeartbeatTimeout
     | GetState of AsyncReplyChannel<RaftState>
+    | Shutdown of AsyncReplyChannel<unit>
 
 type ITransport =
     abstract member StartListener:
@@ -23,4 +24,5 @@ type NodeContext =
       Inbox: MailboxProcessor<NodeMessage>
       State: RaftState
       ElectionTimer: System.Threading.Timer option
-      HeartbeatTimer: System.Threading.Timer option }
+      HeartbeatTimer: System.Threading.Timer option
+      CancellationTokenSource: System.Threading.CancellationTokenSource }
