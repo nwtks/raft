@@ -87,7 +87,6 @@ module NodeAgent =
             state2, false
         | InstallSnapshotMsg snap ->
             let state, response = Replication.handleInstallSnapshot snap ctx.State
-            saveIfChanged ctx state
 
             if response.Success then
                 let snapData = snap.Data
@@ -95,10 +94,14 @@ module NodeAgent =
                 async {
                     try
                         ctx.OnInstallSnapshot snapData
+                        saveIfChanged ctx state
                     with ex ->
-                        log $"Error applying snapshot: {ex.Message}"
+                        log
+                            $"CRITICAL: Snapshot apply failed at index {snap.LastIncludedIndex}: {ex.Message}. Node may require restart."
                 }
                 |> Async.Start
+            else
+                saveIfChanged ctx state
 
             match ctx.Config.Peers |> List.tryFind (fun p -> p.Id = snap.LeaderId) with
             | Some peer -> NodeBroadcaster.sendAsync ctx.Transport peer (InstallSnapshotResponseMsg response)
@@ -164,7 +167,9 @@ module NodeAgent =
             else
                 replyChannel.Reply false
                 ctx.State
-        | _ -> failwith "handleLocalMessage called with non-local message"
+        | _ ->
+            log $"Warning: unexpected message routed to handleLocalMessage, ignoring"
+            ctx.State
 
     let receiveRaftRPC ctx rpcMsg =
         let oldRole = ctx.State.Role

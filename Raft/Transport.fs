@@ -100,32 +100,30 @@ module Transport =
 
     let sendMessage (peer: PeerInfo) msg =
         task {
+            use cts = new System.Threading.CancellationTokenSource 3000
+
             try
                 use client = new System.Net.Sockets.TcpClient()
-                let connectTask = client.ConnectAsync(peer.Host, peer.Port)
-                let timeoutTask = System.Threading.Tasks.Task.Delay 3000
-                let! completed = System.Threading.Tasks.Task.WhenAny(connectTask, timeoutTask)
+                do! client.ConnectAsync(peer.Host, peer.Port, cts.Token)
 
-                if completed = connectTask && client.Connected then
-                    let bytes =
-                        System.Text.Json.JsonSerializer.Serialize(msg, jsonOptions)
-                        |> System.Text.Encoding.UTF8.GetBytes
+                let bytes =
+                    System.Text.Json.JsonSerializer.Serialize(msg, jsonOptions)
+                    |> System.Text.Encoding.UTF8.GetBytes
 
-                    let msgLen = bytes.Length
+                let msgLen = bytes.Length
 
-                    let lenPrefix =
-                        [| byte (msgLen >>> 24)
-                           byte (msgLen >>> 16)
-                           byte (msgLen >>> 8)
-                           byte msgLen |]
+                let lenPrefix =
+                    [| byte (msgLen >>> 24)
+                       byte (msgLen >>> 16)
+                       byte (msgLen >>> 8)
+                       byte msgLen |]
 
-                    use stream = client.GetStream()
-                    do! stream.WriteAsync(lenPrefix, 0, lenPrefix.Length)
-                    do! stream.WriteAsync(bytes, 0, bytes.Length)
-                else
-                    log $"Timeout connecting to {peer.Id} ({peer.Host}:{peer.Port})."
-            with ex ->
-                log $"Failed to send to {peer.Id}: {ex.Message}."
+                use stream = client.GetStream()
+                do! stream.WriteAsync(lenPrefix, 0, lenPrefix.Length, cts.Token)
+                do! stream.WriteAsync(bytes, 0, bytes.Length, cts.Token)
+            with
+            | :? System.OperationCanceledException -> log $"Timeout connecting to {peer.Id} ({peer.Host}:{peer.Port})."
+            | ex -> log $"Failed to send to {peer.Id}: {ex.Message}."
         }
 
 type TcpTransport() =
