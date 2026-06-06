@@ -21,6 +21,11 @@ module Log =
         | Some entry -> entry.Term
         | None -> 0L
 
+    let lastIndexOfTerm term log =
+        log
+        |> List.tryFindBack (fun e -> e.Term = term)
+        |> Option.map (fun e -> e.Index)
+
     let appendEntry entry log = log @ [ entry ]
 
     let append term command log =
@@ -38,6 +43,7 @@ module Log =
 
     let entriesFrom index log =
         log |> List.skipWhile (fun e -> e.Index < index)
+
 
     [<TailCall>]
     let rec _merge acc =

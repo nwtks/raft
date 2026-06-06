@@ -47,7 +47,9 @@ type AppendEntriesResponse =
     { FollowerTerm: Term
       Success: bool
       MatchIndex: LogIndex
-      FollowerId: NodeId }
+      FollowerId: NodeId
+      ConflictTerm: Term
+      ConflictIndex: LogIndex }
 
 type RaftMessage =
     | RequestVoteMsg of RequestVote

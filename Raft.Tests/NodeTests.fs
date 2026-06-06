@@ -188,7 +188,9 @@ let ``RaftNode handles incoming RequestVote RPC and broadcasts election to peers
             { FollowerTerm = voteTerm
               Success = true
               MatchIndex = 0L
-              FollowerId = 2 }
+              FollowerId = 2
+              ConflictTerm = 0L
+              ConflictIndex = 0L }
 
         transport.ReceiveMessage(AppendEntriesResponseMsg aeResp)
 
@@ -253,7 +255,9 @@ let ``Leader RaftNode broadcasts AppendEntries on heartbeat, processes responses
             { FollowerTerm = term
               Success = true
               MatchIndex = 1L
-              FollowerId = 2 }
+              FollowerId = 2
+              ConflictTerm = 0L
+              ConflictIndex = 0L }
 
         transport.ReceiveMessage(AppendEntriesResponseMsg aeResp2)
 
@@ -261,7 +265,9 @@ let ``Leader RaftNode broadcasts AppendEntries on heartbeat, processes responses
             { FollowerTerm = term
               Success = true
               MatchIndex = 1L
-              FollowerId = 3 }
+              FollowerId = 3
+              ConflictTerm = 0L
+              ConflictIndex = 0L }
 
         transport.ReceiveMessage(AppendEntriesResponseMsg aeResp3)
 

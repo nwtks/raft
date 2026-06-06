@@ -29,7 +29,9 @@ module Replication =
                 { FollowerTerm = state.Persistent.CurrentTerm
                   Success = false
                   MatchIndex = 0L
-                  FollowerId = state.Config.NodeId }
+                  FollowerId = state.Config.NodeId
+                  ConflictTerm = 0L
+                  ConflictIndex = 0L }
 
             state, response
         else
@@ -61,15 +63,35 @@ module Replication =
                     { FollowerTerm = newState.Persistent.CurrentTerm
                       Success = true
                       MatchIndex = matchIdx
-                      FollowerId = newState.Config.NodeId }
+                      FollowerId = newState.Config.NodeId
+                      ConflictTerm = 0L
+                      ConflictIndex = 0L }
 
                 newState, response
             else
+                let conflictTerm, conflictIndex =
+                    if ae.PrevLogIndex > Log.lastIndex state2.Persistent.Log then
+                        0L, Log.lastIndex state2.Persistent.Log + 1L
+                    else
+                        let term = Log.termAt ae.PrevLogIndex state2.Persistent.Log
+
+                        let rec firstIdx idx =
+                            if idx <= 0L then
+                                1L
+                            elif Log.termAt (idx - 1L) state2.Persistent.Log <> term then
+                                idx
+                            else
+                                firstIdx (idx - 1L)
+
+                        term, firstIdx ae.PrevLogIndex
+
                 let response =
                     { FollowerTerm = state2.Persistent.CurrentTerm
                       Success = false
                       MatchIndex = 0L
-                      FollowerId = state2.Config.NodeId }
+                      FollowerId = state2.Config.NodeId
+                      ConflictTerm = conflictTerm
+                      ConflictIndex = conflictIndex }
 
                 state2, response
 
@@ -85,10 +107,14 @@ module Replication =
                     let newNextIndex = ls.NextIndex |> Map.add resp.FollowerId (resp.MatchIndex + 1L)
                     State.updateLeaderState newNextIndex newMatchIndex state
                 else
-                    let currentNext =
-                        ls.NextIndex |> Map.tryFind resp.FollowerId |> Option.defaultValue 1L
+                    let newNext =
+                        if resp.ConflictTerm = 0L then
+                            max 1L resp.ConflictIndex
+                        else
+                            match Log.lastIndexOfTerm resp.ConflictTerm state.Persistent.Log with
+                            | None -> max 1L resp.ConflictIndex
+                            | Some lastIdx -> max 1L lastIdx
 
-                    let newNext = max 1L (currentNext - 1L)
                     let newNextIndex = ls.NextIndex |> Map.add resp.FollowerId newNext
                     State.updateLeaderState newNextIndex ls.MatchIndex state
 

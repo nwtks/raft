@@ -122,7 +122,9 @@ let ``Replication.handleAppendEntriesResponse updates term when response contain
         { FollowerTerm = 2L
           Success = false
           MatchIndex = 0L
-          FollowerId = 2 }
+          FollowerId = 2
+          ConflictTerm = 0L
+          ConflictIndex = 0L }
 
     let newState = Replication.handleAppendEntriesResponse resp state
     Assert.Equal(2L, newState.Persistent.CurrentTerm)
@@ -135,7 +137,9 @@ let ``Replication.handleAppendEntriesResponse ignores response when node is not 
         { FollowerTerm = 0L
           Success = true
           MatchIndex = 1L
-          FollowerId = 2 }
+          FollowerId = 2
+          ConflictTerm = 0L
+          ConflictIndex = 0L }
 
     let newState = Replication.handleAppendEntriesResponse resp state
     Assert.Equal(state, newState)
@@ -159,7 +163,9 @@ let ``Replication.handleAppendEntriesResponse decrements NextIndex on failure to
         { FollowerTerm = 1L
           Success = false
           MatchIndex = 0L
-          FollowerId = 2 }
+          FollowerId = 2
+          ConflictTerm = 0L
+          ConflictIndex = 1L }
 
     let newState = Replication.handleAppendEntriesResponse resp state
     let updatedNext = newState.LeaderState.Value.NextIndex.Item 2
