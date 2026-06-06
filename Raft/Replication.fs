@@ -133,7 +133,7 @@ module Replication =
                 ls.MatchIndex
                 |> Map.values
                 |> Seq.toList
-                |> List.append [ Log.lastIndex state.Persistent.Log ] // include leader's own
+                |> List.append [ Log.lastIndex state.Persistent.Log ]
                 |> List.sortDescending
 
             let majority = State.quorumSize state

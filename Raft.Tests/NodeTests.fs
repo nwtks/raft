@@ -308,3 +308,39 @@ let ``Leader RaftNode broadcasts AppendEntries on heartbeat, processes responses
 
         Assert.Equal(Follower, node.GetState().Role)
     }
+
+[<Fact>]
+let ``RaftNode election timeout on Leader does not change state`` () =
+    task {
+        let config = configForNode 1 16008
+        let transport = MockTransport()
+        let persistence = MockPersistence()
+        let node = new RaftNode(config, transport, persistence, ignore)
+
+        node.TriggerElectionTimeout()
+        let leaderState = node.GetState()
+        Assert.Equal(Leader, leaderState.Role)
+
+        node.TriggerElectionTimeout()
+        let stateAfter = node.GetState()
+        Assert.Equal(Leader, stateAfter.Role)
+        Assert.Equal(leaderState.Persistent.CurrentTerm, stateAfter.Persistent.CurrentTerm)
+    }
+
+[<Fact>]
+let ``RaftNode.Dispose does not throw`` () =
+    task {
+        let config = configForNode 1 16007
+        let transport = MockTransport()
+        let persistence = MockPersistence()
+        let node = new RaftNode(config, transport, persistence, ignore)
+
+        let ex: System.Exception option =
+            try
+                (node :> System.IDisposable).Dispose()
+                None
+            with e ->
+                Some e
+
+        Assert.Null ex
+    }
