@@ -2,6 +2,7 @@ module Raft.Tests.PersistenceTests
 
 open Xunit
 open Raft
+open TestHelpers
 
 let getTestNodeId () = System.Random().Next(10000, 99999)
 
@@ -27,12 +28,13 @@ let ``FilePersistence.Save serializes and Load deserializes state correctly`` ()
         { CurrentTerm = 42L
           VotedFor = Some 3
           Log =
-            [ { Index = 1L
-                Term = 40L
-                Command = "put x 1" }
-              { Index = 2L
-                Term = 42L
-                Command = "put y 2" } ] }
+            logFromList
+                [ { Index = 1L
+                    Term = 40L
+                    Command = "put x 1" }
+                  { Index = 2L
+                    Term = 42L
+                    Command = "put y 2" } ] }
 
     try
         persistence.Save originalState
@@ -42,9 +44,9 @@ let ``FilePersistence.Save serializes and Load deserializes state correctly`` ()
         let loadedState = loadedStateOpt.Value
         Assert.Equal(42L, loadedState.CurrentTerm)
         Assert.Equal(Some 3, loadedState.VotedFor)
-        Assert.Equal(2, loadedState.Log.Length)
-        Assert.Equal("put x 1", loadedState.Log.[0].Command)
-        Assert.Equal("put y 2", loadedState.Log.[1].Command)
+        Assert.Equal(2, loadedState.Log.Count)
+        Assert.Equal("put x 1", (Map.find 1L loadedState.Log).Command)
+        Assert.Equal("put y 2", (Map.find 2L loadedState.Log).Command)
     finally
         if System.IO.File.Exists fileName then
             System.IO.File.Delete fileName
@@ -58,15 +60,16 @@ let ``FilePersistence.Save overwrites previously saved state with new state`` ()
     let state1: PersistentState =
         { CurrentTerm = 1L
           VotedFor = None
-          Log = [] }
+          Log = Map.empty }
 
     let state2: PersistentState =
         { CurrentTerm = 2L
           VotedFor = Some 5
           Log =
-            [ { Index = 1L
-                Term = 2L
-                Command = "set a b" } ] }
+            logFromList
+                [ { Index = 1L
+                    Term = 2L
+                    Command = "set a b" } ] }
 
     try
         persistence.Save state1

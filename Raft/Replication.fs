@@ -21,7 +21,7 @@ module Replication =
         createEntries (fun index -> Log.entriesFrom index state.Persistent.Log) followerId state
 
     let createHeartbeat followerId state =
-        createEntries (fun _ -> Log.empty) followerId state
+        createEntries (fun _ -> []) followerId state
 
     let handleAppendEntries ae state =
         if ae.LeaderTerm < state.Persistent.CurrentTerm then

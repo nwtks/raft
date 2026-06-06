@@ -2,6 +2,7 @@ module Raft.Tests.LogTests
 
 open Xunit
 open Raft
+open TestHelpers
 
 let createEntry index term cmd =
     { Index = index
@@ -26,21 +27,21 @@ let ``Log.append adds entry and returns incremented lastIndex`` () =
 
 [<Fact>]
 let ``Log.mergeEntries appends new entries when no conflict exists`` () =
-    let log = [ createEntry 1L 1L "cmd1" ]
+    let log = logFromList [ createEntry 1L 1L "cmd1" ]
     let newEntries = [ createEntry 2L 1L "cmd2" ]
 
     let merged = Log.mergeEntries newEntries log
-    Assert.Equal(2, merged.Length)
+    Assert.Equal(2, merged.Count)
     Assert.Equal(2L, Log.lastIndex merged)
 
 [<Fact>]
 let ``Log.mergeEntries truncates conflicting entries and replaces with leader entries`` () =
     let log =
-        [ createEntry 1L 1L "cmd1"; createEntry 2L 1L "cmd2"; createEntry 3L 1L "cmd3" ]
+        logFromList [ createEntry 1L 1L "cmd1"; createEntry 2L 1L "cmd2"; createEntry 3L 1L "cmd3" ]
 
     let newEntries = [ createEntry 2L 2L "new_cmd2"; createEntry 3L 2L "new_cmd3" ]
 
     let merged = Log.mergeEntries newEntries log
-    Assert.Equal(3, merged.Length)
+    Assert.Equal(3, merged.Count)
     Assert.Equal(2L, (Log.getEntry 2L merged).Value.Term)
     Assert.Equal("new_cmd2", (Log.getEntry 2L merged).Value.Command)

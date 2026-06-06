@@ -1,20 +1,16 @@
 namespace Raft
 
 module Log =
-    let empty: LogEntry list = []
+    let empty: Map<LogIndex, LogEntry> = Map.empty
 
-    let lastIndex =
-        function
-        | [] -> 0L
-        | log -> (List.last log).Index
+    let lastIndex log =
+        if Map.isEmpty log then 0L else log |> Map.keys |> Seq.max
 
-    let lastTerm =
-        function
-        | [] -> 0L
-        | log -> (List.last log).Term
+    let lastTerm log =
+        let idx = lastIndex log
+        if idx = 0L then 0L else log.[idx].Term
 
-    let getEntry index log =
-        log |> List.tryFind (fun e -> e.Index = index)
+    let getEntry index log = log |> Map.tryFind index
 
     let termAt index log =
         match getEntry index log with
@@ -23,10 +19,11 @@ module Log =
 
     let lastIndexOfTerm term log =
         log
-        |> List.tryFindBack (fun e -> e.Term = term)
-        |> Option.map (fun e -> e.Index)
+        |> Map.toSeq
+        |> Seq.tryFindBack (fun (_, e) -> e.Term = term)
+        |> Option.map fst
 
-    let appendEntry entry log = log @ [ entry ]
+    let appendEntry entry log = log |> Map.add entry.Index entry
 
     let append term command log =
         let nextIndex = lastIndex log + 1L
@@ -38,23 +35,19 @@ module Log =
 
         appendEntry entry log
 
-    let truncateFrom index log =
-        log |> List.takeWhile (fun e -> e.Index < index)
-
     let entriesFrom index log =
-        log |> List.skipWhile (fun e -> e.Index < index)
-
+        log |> Map.toList |> List.skipWhile (fun (k, _) -> k < index) |> List.map snd
 
     [<TailCall>]
-    let rec _merge logMap acc =
+    let rec _merge log =
         function
-        | [] -> acc
-        | entry :: rest as remaining ->
-            match logMap |> Map.tryFind entry.Index with
-            | Some existing when existing.Term <> entry.Term -> truncateFrom entry.Index acc @ remaining
-            | Some _ -> _merge logMap acc rest
-            | None -> acc @ remaining
+        | [] -> log
+        | entry :: rest ->
+            match log |> Map.tryFind entry.Index with
+            | Some existing when existing.Term <> entry.Term ->
+                let before = log |> Map.filter (fun k _ -> k < entry.Index)
+                entry :: rest |> List.fold (fun m e -> Map.add e.Index e m) before
+            | Some _ -> _merge log rest
+            | None -> entry :: rest |> List.fold (fun m e -> Map.add e.Index e m) log
 
-    let mergeEntries entries log =
-        let logMap = log |> List.map (fun e -> e.Index, e) |> Map.ofList
-        _merge logMap log entries
+    let mergeEntries entries log = _merge log entries

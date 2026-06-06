@@ -38,7 +38,7 @@ let ``Election.handleRequestVote rejects vote when candidate term is lower than 
             Persistent =
                 { CurrentTerm = 2L
                   VotedFor = None
-                  Log = [] } }
+                  Log = Map.empty } }
 
     let rv =
         { CandidateTerm = 1L
@@ -72,7 +72,7 @@ let ``Election.handleRequestVote grants vote again when already voted for the sa
             Persistent =
                 { CurrentTerm = 1L
                   VotedFor = Some 2
-                  Log = [] } }
+                  Log = Map.empty } }
 
     let rv =
         { CandidateTerm = 1L

@@ -114,8 +114,8 @@ let ``Leader RaftNode accepts submitted commands and applies them to state machi
         Assert.True success
 
         let finalState = node.GetState()
-        Assert.Equal(1, finalState.Persistent.Log.Length)
-        Assert.Equal("put x 10", finalState.Persistent.Log.[0].Command)
+        Assert.Equal(1, finalState.Persistent.Log.Count)
+        Assert.Equal("put x 10", (Map.find 1L finalState.Persistent.Log).Command)
     }
 
 [<Fact>]

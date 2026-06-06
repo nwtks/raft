@@ -16,7 +16,7 @@ let ``Replication.handleAppendEntries rejects request when leader term is lower 
             Persistent =
                 { CurrentTerm = 2L
                   VotedFor = None
-                  Log = [] } }
+                  Log = Map.empty } }
 
     let ae =
         { LeaderTerm = 1L
@@ -29,7 +29,7 @@ let ``Replication.handleAppendEntries rejects request when leader term is lower 
     let newState, resp = Replication.handleAppendEntries ae state
     Assert.False resp.Success
     Assert.Equal(2L, resp.FollowerTerm)
-    Assert.Equal(0, newState.Persistent.Log.Length)
+    Assert.Equal(0, newState.Persistent.Log.Count)
 
 [<Fact>]
 let ``Replication.handleAppendEntries appends entries and updates commit index on success`` () =
@@ -38,7 +38,7 @@ let ``Replication.handleAppendEntries appends entries and updates commit index o
             Persistent =
                 { CurrentTerm = 1L
                   VotedFor = None
-                  Log = [] } }
+                  Log = Map.empty } }
 
     let ae =
         { LeaderTerm = 1L
@@ -51,7 +51,7 @@ let ``Replication.handleAppendEntries appends entries and updates commit index o
     let newState, resp = Replication.handleAppendEntries ae state
     Assert.True resp.Success
     Assert.Equal(1L, resp.MatchIndex)
-    Assert.Equal(1, newState.Persistent.Log.Length)
+    Assert.Equal(1, newState.Persistent.Log.Count)
     Assert.Equal(1L, newState.Volatile.CommitIndex)
 
 [<Fact>]
@@ -66,7 +66,7 @@ let ``Replication.advanceCommitIndex advances commit index when majority of peer
             Persistent =
                 { CurrentTerm = 1L
                   VotedFor = None
-                  Log = [ dummyEntry ] }
+                  Log = logFromList [ dummyEntry ] }
             LeaderState = Some leaderState
             Volatile = { CommitIndex = 0L; LastApplied = 0L } }
 
@@ -86,7 +86,7 @@ let ``Replication.handleAppendEntries rejects when PrevLogIndex term mismatches 
             Persistent =
                 { CurrentTerm = 2L
                   VotedFor = None
-                  Log = [ dummyEntry ] } } // index 1, term 1
+                  Log = logFromList [ dummyEntry ] } } // index 1, term 1
 
     let ae =
         { LeaderTerm = 2L
@@ -142,7 +142,7 @@ let ``Replication.handleAppendEntriesResponse decrements NextIndex on failure to
             Persistent =
                 { CurrentTerm = 1L
                   VotedFor = None
-                  Log = [ dummyEntry ] }
+                  Log = logFromList [ dummyEntry ] }
             LeaderState = Some leaderState }
 
     let resp =
@@ -167,4 +167,4 @@ let ``Replication.advanceCommitIndex returns unchanged state when node is not Le
 let ``Replication.appendCommand discards command when node is not Leader`` () =
     let state = State.init dummyConfig None
     let newState = Replication.appendCommand "should fail" state
-    Assert.Empty newState.Persistent.Log
+    Assert.True(Map.isEmpty newState.Persistent.Log)

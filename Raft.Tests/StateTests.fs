@@ -20,14 +20,14 @@ let ``State.init with persisted state restores CurrentTerm, VotedFor, and Log co
     let loaded: PersistentState =
         { CurrentTerm = 5L
           VotedFor = Some 2
-          Log = [ { Index = 1L; Term = 4L; Command = "x" } ] }
+          Log = logFromList [ { Index = 1L; Term = 4L; Command = "x" } ] }
 
     let state = State.init dummyConfigStandalone (Some loaded)
 
     Assert.Equal(5L, state.Persistent.CurrentTerm)
     Assert.Equal(Some 2, state.Persistent.VotedFor)
-    Assert.Single state.Persistent.Log |> ignore
-    Assert.Equal(1L, state.Persistent.Log.[0].Index)
+    Assert.Equal(1, state.Persistent.Log.Count)
+    Assert.Equal(1L, (Map.find 1L state.Persistent.Log).Index)
     Assert.Equal(Follower, state.Role)
     Assert.Equal(0L, state.Volatile.CommitIndex)
     Assert.Equal(0L, state.Volatile.LastApplied)

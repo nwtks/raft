@@ -39,3 +39,6 @@ let dummyPeer port =
     { Id = 2
       Host = "127.0.0.1"
       Port = port }
+
+let logFromList (entries: LogEntry list) =
+    entries |> List.map (fun e -> e.Index, e) |> Map.ofList

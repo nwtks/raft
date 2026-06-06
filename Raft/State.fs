@@ -3,7 +3,7 @@ namespace Raft
 type PersistentState =
     { CurrentTerm: Term
       VotedFor: NodeId option
-      Log: LogEntry list }
+      Log: Map<LogIndex, LogEntry> }
 
 type IPersistence =
     abstract member Save: PersistentState -> unit

@@ -2,6 +2,7 @@ module Raft.Tests.IntegrationTests
 
 open Xunit
 open Raft
+open TestHelpers
 
 // Simulate simple cluster by directly passing messages (no TCP).
 [<Fact>]
@@ -52,7 +53,7 @@ let ``3-node cluster elects a leader and commits a client command`` () =
     // 4. Client submits command to leader
     s1 <- Replication.appendCommand "put a 10" s1
 
-    Assert.Equal(1, s1.Persistent.Log.Length)
+    Assert.Equal(1, s1.Persistent.Log.Count)
 
     // 5. Leader sends AppendEntries
     let ae_to2 = Replication.createAppendEntries 2 s1
@@ -65,7 +66,7 @@ let ``3-node cluster elects a leader and commits a client command`` () =
     s3 <- s3_after_ae
 
     Assert.True resp2_ae.Success
-    Assert.Equal(1, s2.Persistent.Log.Length)
+    Assert.Equal(1, s2.Persistent.Log.Count)
 
     // 7. Leader handles responses and advances commit index
     s1 <- Replication.handleAppendEntriesResponse resp2_ae s1
@@ -330,14 +331,14 @@ let ``Leader resolves log inconsistency by decrementing NextIndex and retrying A
             Persistent =
                 { s1.Persistent with
                     CurrentTerm = 3L
-                    Log = [ entry1 ] } }
+                    Log = logFromList [ entry1 ] } }
 
     s2 <-
         { s2 with
             Persistent =
                 { s2.Persistent with
                     CurrentTerm = 3L
-                    Log = [ entry1 ] } }
+                    Log = logFromList [ entry1 ] } }
 
     // 2. LOG INCONSISTENCY:
     // Node 1 (Leader) has [1,1,A]; [2,1,B]
@@ -350,7 +351,7 @@ let ``Leader resolves log inconsistency by decrementing NextIndex and retrying A
             Role = Leader
             Persistent =
                 { s1.Persistent with
-                    Log = [ entry1; entry1B ] }
+                    Log = logFromList [ entry1; entry1B ] }
             LeaderState =
                 Some
                     { NextIndex = Map.ofList [ 2, 3L ]
@@ -360,12 +361,12 @@ let ``Leader resolves log inconsistency by decrementing NextIndex and retrying A
         { s2 with
             Persistent =
                 { s2.Persistent with
-                    Log = [ entry1; entry2C ] } }
+                    Log = logFromList [ entry1; entry2C ] } }
 
     // 3. Leader adds a new command at index 3
     s1 <- Replication.appendCommand "D" s1
 
-    Assert.Equal(3, s1.Persistent.Log.Length)
+    Assert.Equal(3, s1.Persistent.Log.Count)
 
     // 4. Leader tries to send AppendEntries for index 3.
     // PrevLogIndex = 2, PrevLogTerm = 1 (Node 1's term at index 2)
@@ -404,9 +405,9 @@ let ``Leader resolves log inconsistency by decrementing NextIndex and retrying A
 
     Assert.True resp_success.Success
     Assert.Equal(3L, resp_success.MatchIndex)
-    Assert.Equal(3, s2.Persistent.Log.Length)
-    Assert.Equal("B", s2.Persistent.Log.[1].Command)
-    Assert.Equal("D", s2.Persistent.Log.[2].Command)
+    Assert.Equal(3, s2.Persistent.Log.Count)
+    Assert.Equal("B", (Map.find 2L s2.Persistent.Log).Command)
+    Assert.Equal("D", (Map.find 3L s2.Persistent.Log).Command)
 
     // 9. Leader finalizes match index
     s1 <- Replication.handleAppendEntriesResponse resp_success s1

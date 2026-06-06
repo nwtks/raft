@@ -43,7 +43,7 @@ let printState (node: RaftNode) =
     let st = node.GetState()
     printfn "Role: %A, Term: %d, Leader: %A" st.Role st.Persistent.CurrentTerm st.CurrentLeader
     printfn "CommitIndex: %d, LastApplied: %d" st.Volatile.CommitIndex st.Volatile.LastApplied
-    printfn "Log length: %d" (List.length st.Persistent.Log)
+    printfn "Log entries: %d" (st.Persistent.Log.Count)
 
 let getValue (cmd: string) kvs kvsLock =
     let p = cmd.Split ' '
