@@ -6,14 +6,10 @@ module NodeBroadcaster =
     let sendAsync (transport: ITransport) peer msg =
         let task = transport.SendMessage peer msg
 
-        if task.IsCompleted then
-            if task.IsFaulted then
-                log $"Failed to send to {peer.Id}: {task.Exception.InnerException.Message}"
-        else
-            task.ContinueWith(fun (t: System.Threading.Tasks.Task) ->
-                if t.IsFaulted then
-                    log $"Failed to send to {peer.Id}: {t.Exception.InnerException.Message}")
-            |> ignore
+        task.ContinueWith(fun (t: System.Threading.Tasks.Task) ->
+            if t.IsFaulted then
+                log $"Failed to send to {peer.Id}: {t.Exception.InnerException.Message}")
+        |> ignore
 
     let broadcastRequestVote config (transport: ITransport) state =
         let requestVote = Election.createRequestVote state
