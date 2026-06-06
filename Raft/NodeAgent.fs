@@ -17,7 +17,7 @@ module NodeAgent =
             | Some entry ->
                 onApply entry
                 loopApplyCommitted onApply state next
-            | None -> loopApplyCommitted onApply state next
+            | None -> loopApplyCommitted onApply state (next + 1L)
         else
             state, lastApplied
 
