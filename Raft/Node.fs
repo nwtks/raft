@@ -61,6 +61,8 @@ type RaftNode
 
     interface System.IDisposable with
         member _.Dispose() =
-            agent.PostAndReply(fun ch -> Shutdown ch)
-            cts.Dispose()
-            (agent :> System.IDisposable).Dispose()
+            try
+                agent.PostAndReply(fun ch -> Shutdown ch)
+            finally
+                cts.Dispose()
+                (agent :> System.IDisposable).Dispose()
