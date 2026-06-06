@@ -95,15 +95,15 @@ module Replication =
                     else
                         let term = Log.termAt ae.PrevLogIndex state2.Persistent.Log
 
-                        let rec firstIdx idx =
-                            if idx <= 0L then
-                                1L
-                            elif Log.termAt (idx - 1L) state2.Persistent.Log <> term then
-                                idx
-                            else
-                                firstIdx (idx - 1L)
+                        let firstIdx =
+                            let mutable idx = ae.PrevLogIndex
 
-                        term, firstIdx ae.PrevLogIndex
+                            while idx > 1L && Log.termAt (idx - 1L) state2.Persistent.Log = term do
+                                idx <- idx - 1L
+
+                            idx
+
+                        term, firstIdx
 
                 let response =
                     { FollowerTerm = state2.Persistent.CurrentTerm
