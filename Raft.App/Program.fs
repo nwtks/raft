@@ -45,11 +45,13 @@ let printState (node: RaftNode) =
     printfn "CommitIndex: %d, LastApplied: %d" st.Volatile.CommitIndex st.Volatile.LastApplied
     printfn "Log length: %d" (List.length st.Persistent.Log)
 
-let getValue (cmd: string) kvs =
-    let p = cmd.Split(' ')
+let getValue (cmd: string) kvs kvsLock =
+    let p = cmd.Split ' '
 
     if p.Length = 2 then
-        match kvs |> Map.tryFind p.[1] with
+        let v = lock kvsLock (fun () -> kvs |> Map.tryFind p.[1])
+
+        match v with
         | Some v -> printfn "%s" v
         | None -> printfn "(not found)"
 
@@ -60,7 +62,7 @@ let submitCommand cmd (node: RaftNode) =
         printfn "Error: Not the leader. Cannot accept writes."
 
 [<TailCall>]
-let rec inputLoop node kvs =
+let rec inputLoop node kvs kvsLock =
     printf "> "
     let input = System.Console.ReadLine()
 
@@ -70,28 +72,29 @@ let rec inputLoop node kvs =
         match input.Trim() with
         | "quit"
         | "q" -> ()
-        | "" -> inputLoop node kvs
+        | "" -> inputLoop node kvs kvsLock
         | "state" ->
             printState node
-            inputLoop node kvs
+            inputLoop node kvs kvsLock
         | cmd when cmd.StartsWith "get " ->
-            getValue cmd kvs
-            inputLoop node kvs
+            getValue cmd kvs kvsLock
+            inputLoop node kvs kvsLock
         | cmd when cmd.StartsWith "put " ->
             submitCommand cmd node
-            inputLoop node kvs
+            inputLoop node kvs kvsLock
         | _ ->
             printfn "Unknown command."
-            inputLoop node kvs
+            inputLoop node kvs kvsLock
 
 let runNode nodeId =
+    let kvsLock = obj ()
     let mutable kvs = Map.empty<string, string>
 
     let onApply entry =
         printfn "\n>>> Applied [%d:T%d]: %s" entry.Index entry.Term entry.Command
 
-        match entry.Command.Split(' ') with
-        | [| "put"; k; v |] -> kvs <- kvs |> Map.add k v
+        match entry.Command.Split ' ' with
+        | [| "put"; k; v |] -> lock kvsLock (fun () -> kvs <- kvs |> Map.add k v)
         | _ -> ()
 
         printf "> "
@@ -103,7 +106,7 @@ let runNode nodeId =
     use node = new RaftNode(config, transport, persistence, onApply)
     System.Threading.Thread.Sleep 2000
     printCommands ()
-    inputLoop node kvs
+    inputLoop node kvs kvsLock
 
 let parseArgv argv =
     argv
