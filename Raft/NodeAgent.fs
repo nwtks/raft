@@ -1,6 +1,17 @@
 namespace Raft
 
 module NodeAgent =
+    let log msg = printfn "[Node] %s" msg
+
+    let sendAsync (transport: ITransport) peer msg =
+        async {
+            try
+                do! transport.SendMessage peer msg |> Async.AwaitTask
+            with ex ->
+                log $"Failed to send to {peer.Id}: {ex.Message}"
+        }
+        |> Async.Start
+
     [<TailCall>]
     let rec loopApplyCommitted onApply state lastApplied =
         if lastApplied < state.Volatile.CommitIndex then
@@ -48,8 +59,11 @@ module NodeAgent =
         | RequestVoteMsg requestVote ->
             let state, response = Election.handleRequestVote requestVote ctx.State
             saveIfChanged ctx state
-            let peer = ctx.Config.Peers |> List.find (fun p -> p.Id = requestVote.CandidateId)
-            ctx.Transport.SendMessage peer (RequestVoteResponseMsg response) |> ignore
+
+            match ctx.Config.Peers |> List.tryFind (fun p -> p.Id = requestVote.CandidateId) with
+            | Some peer -> sendAsync ctx.Transport peer (RequestVoteResponseMsg response)
+            | None -> log $"Warning: Unknown candidate {requestVote.CandidateId} for RequestVote response"
+
             state, true
         | RequestVoteResponseMsg response ->
             let state = Election.handleVoteResponse response.VoterId response ctx.State
@@ -58,8 +72,11 @@ module NodeAgent =
         | AppendEntriesMsg appendEntries ->
             let state, response = Replication.handleAppendEntries appendEntries ctx.State
             saveIfChanged ctx state
-            let peer = ctx.Config.Peers |> List.find (fun p -> p.Id = appendEntries.LeaderId)
-            ctx.Transport.SendMessage peer (AppendEntriesResponseMsg response) |> ignore
+
+            match ctx.Config.Peers |> List.tryFind (fun p -> p.Id = appendEntries.LeaderId) with
+            | Some peer -> sendAsync ctx.Transport peer (AppendEntriesResponseMsg response)
+            | None -> log $"Warning: Unknown leader {appendEntries.LeaderId} for AppendEntries response"
+
             state, true
         | AppendEntriesResponseMsg response ->
             let state = Replication.handleAppendEntriesResponse response ctx.State

@@ -45,7 +45,9 @@ module Log =
         | entry :: rest ->
             match log |> Map.tryFind entry.Index with
             | Some existing when existing.Term <> entry.Term ->
-                let before = log |> Map.filter (fun k _ -> k < entry.Index)
+                let before =
+                    log |> Map.toSeq |> Seq.takeWhile (fun (k, _) -> k < entry.Index) |> Map.ofSeq
+
                 entry :: rest |> List.fold (fun m e -> Map.add e.Index e m) before
             | Some _ -> _merge log rest
             | None -> entry :: rest |> List.fold (fun m e -> Map.add e.Index e m) log
