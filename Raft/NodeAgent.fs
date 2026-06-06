@@ -1,16 +1,17 @@
 namespace Raft
 
 module NodeAgent =
+    [<TailCall>]
+    let rec loopApplyCommitted onApply state lastApplied =
+        if lastApplied < state.Volatile.CommitIndex then
+            let next = lastApplied + 1L
+            Log.getEntry next state.Persistent.Log |> Option.iter onApply
+            loopApplyCommitted onApply state next
+        else
+            lastApplied
+
     let applyCommitted onApply state =
-        let mutable lastApplied = state.Volatile.LastApplied
-
-        while lastApplied < state.Volatile.CommitIndex do
-            lastApplied <- lastApplied + 1L
-
-            match Log.getEntry lastApplied state.Persistent.Log with
-            | Some entry -> onApply entry
-            | None -> ()
-
+        let lastApplied = loopApplyCommitted onApply state state.Volatile.LastApplied
         State.updateLastApplied lastApplied state
 
     let saveIfChanged ctx newState =
@@ -79,24 +80,20 @@ module NodeAgent =
         let oldRole = ctx.State.Role
         let newState, sendReply = handleRaftMessage ctx rpcMsg
 
-        if oldRole <> Leader && newState.Role = Leader then
-            NodeBroadcaster.broadcastHeartbeat ctx.Config ctx.Transport newState
-            let heartbeatTimer = NodeTimer.resetHeartbeatTimer ctx
-            NodeTimer.stopTimer ctx.ElectionTimer
-            let state = applyCommitted ctx.OnApply newState
-            state, ctx.ElectionTimer, heartbeatTimer
-        elif oldRole = Leader && newState.Role <> Leader then
-            NodeTimer.stopTimer ctx.HeartbeatTimer
-            let electionTimer = NodeTimer.resetElectionTimer ctx
-            let state = applyCommitted ctx.OnApply newState
-            state, electionTimer, ctx.HeartbeatTimer
-        elif sendReply then
-            let electionTimer = NodeTimer.resetElectionTimer ctx
-            let state = applyCommitted ctx.OnApply newState
-            state, electionTimer, ctx.HeartbeatTimer
-        else
-            let state = applyCommitted ctx.OnApply newState
-            state, ctx.ElectionTimer, ctx.HeartbeatTimer
+        let electionTimer, heartbeatTimer =
+            if oldRole <> Leader && newState.Role = Leader then
+                NodeBroadcaster.broadcastHeartbeat ctx.Config ctx.Transport newState
+                NodeTimer.stopTimer ctx.ElectionTimer
+                ctx.ElectionTimer, NodeTimer.resetHeartbeatTimer ctx
+            elif oldRole = Leader && newState.Role <> Leader then
+                NodeTimer.stopTimer ctx.HeartbeatTimer
+                NodeTimer.resetElectionTimer ctx, ctx.HeartbeatTimer
+            elif sendReply then
+                NodeTimer.resetElectionTimer ctx, ctx.HeartbeatTimer
+            else
+                ctx.ElectionTimer, ctx.HeartbeatTimer
+
+        applyCommitted ctx.OnApply newState, electionTimer, heartbeatTimer
 
     [<TailCall>]
     let rec agentLoop ctx =
