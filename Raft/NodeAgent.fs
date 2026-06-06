@@ -47,7 +47,7 @@ module NodeAgent =
             let state, response = Election.handleRequestVote requestVote ctx.State
             saveIfChanged ctx state
             let peer = ctx.Config.Peers |> List.find (fun p -> p.Id = requestVote.CandidateId)
-            ctx.Transport.SendMessage peer (RequestVoteResponseMsg response)
+            ctx.Transport.SendMessage peer (RequestVoteResponseMsg response) |> ignore
             state, true
         | RequestVoteResponseMsg response ->
             let state = Election.handleVoteResponse response.VoterId response ctx.State
@@ -57,7 +57,7 @@ module NodeAgent =
             let state, response = Replication.handleAppendEntries appendEntries ctx.State
             saveIfChanged ctx state
             let peer = ctx.Config.Peers |> List.find (fun p -> p.Id = appendEntries.LeaderId)
-            ctx.Transport.SendMessage peer (AppendEntriesResponseMsg response)
+            ctx.Transport.SendMessage peer (AppendEntriesResponseMsg response) |> ignore
             state, true
         | AppendEntriesResponseMsg response ->
             let state = Replication.handleAppendEntriesResponse response ctx.State

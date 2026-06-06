@@ -14,7 +14,7 @@ type ITransport =
         ct: System.Threading.CancellationToken ->
             System.Threading.Tasks.Task<unit>
 
-    abstract member SendMessage: peer: PeerInfo -> msg: RaftMessage -> unit
+    abstract member SendMessage: peer: PeerInfo -> msg: RaftMessage -> System.Threading.Tasks.Task<unit>
 
 type NodeContext =
     { Config: NodeConfig

@@ -127,7 +127,6 @@ module Transport =
             with ex ->
                 log $"Failed to send to {peer.Id}: {ex.Message}."
         }
-        |> ignore
 
 type TcpTransport() =
     interface ITransport with

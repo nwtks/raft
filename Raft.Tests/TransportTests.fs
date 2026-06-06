@@ -36,7 +36,7 @@ let ``TcpTransport.SendMessage triggers listener callback with correct message o
           LastLogTerm = 0L }
 
     let msg = RequestVoteMsg reqVote
-    tcpTransport.SendMessage (dummyPeer port) msg
+    tcpTransport.SendMessage (dummyPeer port) msg |> ignore
     let received = tcs.Task.Wait(System.TimeSpan.FromSeconds 5.0)
     cts.Cancel()
     Assert.True(received, "Message was not received within timeout")

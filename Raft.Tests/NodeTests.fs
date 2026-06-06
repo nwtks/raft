@@ -14,7 +14,9 @@ type MockTransport() =
         | None -> ()
 
     interface ITransport with
-        member _.SendMessage peer msg = messages.Add((peer, msg))
+        member _.SendMessage peer msg =
+            messages.Add((peer, msg))
+            System.Threading.Tasks.Task.FromResult(())
 
         member _.StartListener _ postMessage _ =
             postMessageOpt <- Some postMessage
