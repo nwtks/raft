@@ -5,7 +5,6 @@ type RaftNode(config: NodeConfig, transport: ITransport, persistence: IPersisten
 
     let agent =
         MailboxProcessor.Start(fun inbox ->
-            transport.StartListener config (RaftRPC >> inbox.Post) cts.Token |> ignore
             let loadedState = persistence.Load()
 
             let ctx: NodeContext =
@@ -23,10 +22,16 @@ type RaftNode(config: NodeConfig, transport: ITransport, persistence: IPersisten
                 { ctx with
                     ElectionTimer = NodeTimer.resetElectionTimer ctx })
 
+    do transport.StartListener config (RaftRPC >> agent.Post) cts.Token |> ignore
+
     member _.SubmitCommand cmd =
         agent.PostAndReply(fun ch -> RaftRPC(ClientCommand(cmd, Some ch)))
 
     member _.GetState() = agent.PostAndReply GetState
+
+    member _.TriggerElectionTimeout() = agent.Post ElectionTimeout
+
+    member _.TriggerHeartbeatTimeout() = agent.Post HeartbeatTimeout
 
     interface System.IDisposable with
         member _.Dispose() =

@@ -90,8 +90,7 @@ let ``RaftNode transitions to Candidate then Leader in single-node cluster after
         let initialState = node.GetState()
         Assert.Equal(Follower, initialState.Role)
 
-        do! System.Threading.Tasks.Task.Delay 500
-
+        node.TriggerElectionTimeout()
         let stateAfterTimeout = node.GetState()
         Assert.Equal(Leader, stateAfterTimeout.Role)
         Assert.Equal(1L, stateAfterTimeout.Persistent.CurrentTerm)
@@ -108,8 +107,7 @@ let ``Leader RaftNode accepts submitted commands and applies them to state machi
         let persistence = MockPersistence()
         let node = new RaftNode(config, transport, persistence, onApply)
 
-        do! System.Threading.Tasks.Task.Delay 500
-
+        node.TriggerElectionTimeout()
         let success = node.SubmitCommand "put x 10"
         Assert.True success
 
@@ -126,8 +124,6 @@ let ``RaftNode handles incoming RequestVote RPC and broadcasts election to peers
         let persistence = MockPersistence()
         let node = new RaftNode(config, transport, persistence, ignore)
 
-        do! System.Threading.Tasks.Task.Delay 500
-
         let rv =
             { CandidateTerm = 1L
               CandidateId = 2
@@ -135,8 +131,7 @@ let ``RaftNode handles incoming RequestVote RPC and broadcasts election to peers
               LastLogTerm = 0L }
 
         transport.ReceiveMessage(RequestVoteMsg rv)
-
-        do! System.Threading.Tasks.Task.Delay 50
+        node.GetState() |> ignore
 
         Assert.Contains(
             transport.Messages,
@@ -147,7 +142,8 @@ let ``RaftNode handles incoming RequestVote RPC and broadcasts election to peers
                    | _ -> false
         )
 
-        do! System.Threading.Tasks.Task.Delay 500
+        node.TriggerElectionTimeout()
+        node.GetState() |> ignore
 
         Assert.Contains(
             transport.Messages,
@@ -174,8 +170,7 @@ let ``RaftNode handles incoming RequestVote RPC and broadcasts election to peers
               VoteGranted = true }
 
         transport.ReceiveMessage(RequestVoteResponseMsg voteResp3)
-
-        do! System.Threading.Tasks.Task.Delay 50
+        node.GetState() |> ignore
 
         let state = node.GetState()
         Assert.Equal(Leader, state.Role)
@@ -206,8 +201,7 @@ let ``RaftNode handles incoming RequestVote RPC and broadcasts election to peers
               LeaderCommit = 0L }
 
         transport.ReceiveMessage(AppendEntriesMsg ae)
-
-        do! System.Threading.Tasks.Task.Delay 50
+        node.GetState() |> ignore
 
         let finalState = node.GetState()
         Assert.Equal(Follower, finalState.Role)
@@ -223,7 +217,8 @@ let ``Leader RaftNode broadcasts AppendEntries on heartbeat, processes responses
         let persistence = MockPersistence()
         let node = new RaftNode(config, transport, persistence, onApply)
 
-        do! System.Threading.Tasks.Task.Delay 500
+        node.TriggerElectionTimeout()
+        node.GetState() |> ignore
 
         let s = node.GetState()
         let term = s.Persistent.CurrentTerm
@@ -235,15 +230,15 @@ let ``Leader RaftNode broadcasts AppendEntries on heartbeat, processes responses
                   VoteGranted = true }
         )
 
-        do! System.Threading.Tasks.Task.Delay 50
+        node.GetState() |> ignore
 
         Assert.Equal(Leader, node.GetState().Role)
 
         transport.Messages.Clear()
-        let success = node.SubmitCommand("put a 42")
+        let success = node.SubmitCommand "put a 42"
         Assert.True success
 
-        do! System.Threading.Tasks.Task.Delay 50
+        node.GetState() |> ignore
 
         Assert.Contains(
             transport.Messages,
@@ -270,7 +265,7 @@ let ``Leader RaftNode broadcasts AppendEntries on heartbeat, processes responses
 
         transport.ReceiveMessage(AppendEntriesResponseMsg aeResp3)
 
-        do! System.Threading.Tasks.Task.Delay 50
+        node.GetState() |> ignore
 
         let finalState2 = node.GetState()
         Assert.Equal(1L, finalState2.Volatile.CommitIndex)
@@ -279,7 +274,8 @@ let ``Leader RaftNode broadcasts AppendEntries on heartbeat, processes responses
 
         transport.Messages.Clear()
 
-        do! System.Threading.Tasks.Task.Delay 500
+        node.TriggerHeartbeatTimeout()
+        node.GetState() |> ignore
 
         Assert.Contains(
             transport.Messages,
@@ -300,7 +296,7 @@ let ``Leader RaftNode broadcasts AppendEntries on heartbeat, processes responses
                   LeaderCommit = 1L }
         )
 
-        do! System.Threading.Tasks.Task.Delay 50
+        node.GetState() |> ignore
 
         Assert.Equal(Follower, node.GetState().Role)
     }
