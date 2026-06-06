@@ -105,3 +105,10 @@ type RaftMessageConverter() =
             writer.WriteEndArray()
 
         writer.WriteEndObject()
+
+module JsonConfig =
+    let options =
+        let opts = System.Text.Json.JsonSerializerOptions()
+        opts.Converters.Add(OptionConverterFactory())
+        opts.Converters.Add(RaftMessageConverter())
+        opts

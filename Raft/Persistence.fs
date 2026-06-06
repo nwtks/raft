@@ -3,11 +3,8 @@ namespace Raft
 module Persistence =
     let log msg = printfn "[Persistence] %s" msg
 
-    let options = System.Text.Json.JsonSerializerOptions()
-    do options.Converters.Add(OptionConverterFactory())
-
     let save fileName state =
-        let json = System.Text.Json.JsonSerializer.Serialize(state, options)
+        let json = System.Text.Json.JsonSerializer.Serialize(state, JsonConfig.options)
         let tempFile = fileName + ".tmp"
         System.IO.File.WriteAllText(tempFile, json)
         System.IO.File.Move(tempFile, fileName, true)
@@ -16,7 +13,7 @@ module Persistence =
         if System.IO.File.Exists fileName then
             try
                 let json = System.IO.File.ReadAllText fileName
-                Some(System.Text.Json.JsonSerializer.Deserialize<PersistentState>(json, options))
+                Some(System.Text.Json.JsonSerializer.Deserialize<PersistentState>(json, JsonConfig.options))
             with ex ->
                 log $"Failed to deserialize state file '{fileName}': {ex.Message}"
                 None

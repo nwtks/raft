@@ -610,28 +610,6 @@ let ``Replication.advanceCommitIndex does not advance when term does not match c
     Assert.Equal(0L, newState.Volatile.CommitIndex)
 
 [<Fact>]
-let ``Replication.appendConfiguration appends config entry when leader`` () =
-    let state = State.initLeaderState (State.init dummyConfig None)
-    let newPeers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 4; Host = ""; Port = 0 } ]
-    let newState = Replication.appendConfiguration newPeers state
-
-    Assert.Equal(1, newState.Persistent.Log.Count)
-    let entry = newState.Persistent.Log.[1L]
-    Assert.StartsWith(Constants.ConfigCommandPrefix, entry.Command)
-
-    let json = entry.Command.Substring(Constants.ConfigCommandPrefix.Length)
-    let deserialized = System.Text.Json.JsonSerializer.Deserialize<PeerInfo list> json
-    Assert.Equal(2, deserialized.Length)
-    Assert.Contains(4, deserialized |> List.map (fun p -> p.Id))
-
-[<Fact>]
-let ``Replication.appendConfiguration discards when node is not Leader`` () =
-    let state = State.init dummyConfig None
-    let newPeers = [ { Id = 2; Host = ""; Port = 0 } ]
-    let newState = Replication.appendConfiguration newPeers state
-    Assert.True(Map.isEmpty newState.Persistent.Log)
-
-[<Fact>]
 let ``Replication.appendCommand discards command when node is not Leader`` () =
     let state = State.init dummyConfig None
     let newState = Replication.appendCommand "should fail" state

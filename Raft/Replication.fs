@@ -21,22 +21,6 @@ module Replication =
                       Entries = entries nextIdx
                       LeaderCommit = state.Volatile.CommitIndex }
 
-    let createInstallSnapshot followerId state =
-        match state.LeaderState, state.Persistent.Snapshot with
-        | Some ls, Some snap ->
-            let nextIdx = ls.NextIndex |> Map.tryFind followerId |> Option.defaultValue 1L
-
-            if nextIdx <= snap.LastIncludedIndex + 1L then
-                Some
-                    { LeaderTerm = state.Persistent.CurrentTerm
-                      LeaderId = state.Config.NodeId
-                      LastIncludedIndex = snap.LastIncludedIndex
-                      LastIncludedTerm = snap.LastIncludedTerm
-                      Data = snap.StateMachineData }
-            else
-                None
-        | _ -> None
-
     let createAppendEntries followerId state =
         createEntries (fun index -> Log.entriesFrom index state.Persistent.Log) followerId state
 
@@ -115,6 +99,47 @@ module Replication =
 
                 state2, response
 
+    let handleAppendEntriesResponse (resp: AppendEntriesResponse) state =
+        if resp.FollowerTerm > state.Persistent.CurrentTerm then
+            State.updateTerm resp.FollowerTerm state
+        elif resp.FollowerTerm < state.Persistent.CurrentTerm then
+            state
+        else
+            match state.LeaderState with
+            | None -> state
+            | Some ls ->
+                if resp.Success then
+                    let newMatchIndex = ls.MatchIndex |> Map.add resp.FollowerId resp.MatchIndex
+                    let newNextIndex = ls.NextIndex |> Map.add resp.FollowerId (resp.MatchIndex + 1L)
+                    State.updateLeaderState newNextIndex newMatchIndex state
+                else
+                    let newNext =
+                        if resp.ConflictTerm = 0L then
+                            max 1L resp.ConflictIndex
+                        else
+                            match Log.lastIndexOfTerm resp.ConflictTerm state.Persistent.Log with
+                            | None -> max 1L resp.ConflictIndex
+                            | Some lastIdx -> max 1L lastIdx
+
+                    let newNextIndex = ls.NextIndex |> Map.add resp.FollowerId newNext
+                    State.updateLeaderState newNextIndex ls.MatchIndex state
+
+    let createInstallSnapshot followerId state =
+        match state.LeaderState, state.Persistent.Snapshot with
+        | Some ls, Some snap ->
+            let nextIdx = ls.NextIndex |> Map.tryFind followerId |> Option.defaultValue 1L
+
+            if nextIdx <= snap.LastIncludedIndex + 1L then
+                Some
+                    { LeaderTerm = state.Persistent.CurrentTerm
+                      LeaderId = state.Config.NodeId
+                      LastIncludedIndex = snap.LastIncludedIndex
+                      LastIncludedTerm = snap.LastIncludedTerm
+                      Data = snap.StateMachineData }
+            else
+                None
+        | _ -> None
+
     let handleInstallSnapshot snap state =
         if snap.LeaderTerm < state.Persistent.CurrentTerm then
             state,
@@ -150,35 +175,16 @@ module Replication =
                 else
                     state
 
-    let handleAppendEntriesResponse (resp: AppendEntriesResponse) state =
-        if resp.FollowerTerm > state.Persistent.CurrentTerm then
-            State.updateTerm resp.FollowerTerm state
-        elif resp.FollowerTerm < state.Persistent.CurrentTerm then
-            state
-        else
-            match state.LeaderState with
-            | None -> state
-            | Some ls ->
-                if resp.Success then
-                    let newMatchIndex = ls.MatchIndex |> Map.add resp.FollowerId resp.MatchIndex
-                    let newNextIndex = ls.NextIndex |> Map.add resp.FollowerId (resp.MatchIndex + 1L)
-                    State.updateLeaderState newNextIndex newMatchIndex state
-                else
-                    let newNext =
-                        if resp.ConflictTerm = 0L then
-                            max 1L resp.ConflictIndex
-                        else
-                            match Log.lastIndexOfTerm resp.ConflictTerm state.Persistent.Log with
-                            | None -> max 1L resp.ConflictIndex
-                            | Some lastIdx -> max 1L lastIdx
+    let canCommitIndex state leaderState index =
+        let supporters =
+            leaderState.MatchIndex
+            |> Map.toSeq
+            |> Seq.filter (fun (_, m) -> m >= index)
+            |> Seq.map fst
+            |> Set.ofSeq
+            |> Set.add state.Config.NodeId
 
-                    let newNextIndex = ls.NextIndex |> Map.add resp.FollowerId newNext
-                    State.updateLeaderState newNextIndex ls.MatchIndex state
-
-    let canCommitIndex matchIndices majority state index =
-        let count = matchIndices |> List.filter (fun m -> m >= index) |> List.length
-
-        count >= majority
+        State.hasQuorum supporters state
         && index > state.Volatile.CommitIndex
         && Log.termAt index state.Persistent.Log = state.Persistent.CurrentTerm
 
@@ -186,29 +192,33 @@ module Replication =
         match state.LeaderState with
         | None -> state
         | Some ls ->
-            let matchIndices =
-                ls.MatchIndex
-                |> Map.values
-                |> Seq.toList
-                |> List.append [ Log.lastIndex state.Persistent.Log ]
-                |> List.sortDescending
-
-            let majority = State.quorumSize state
             let lastIdx = Log.lastIndex state.Persistent.Log
 
             let newCommitIndex =
                 seq { lastIdx .. -1L .. state.Volatile.CommitIndex + 1L }
-                |> Seq.tryFind (canCommitIndex matchIndices majority state)
+                |> Seq.tryFind (canCommitIndex state ls)
                 |> Option.defaultValue state.Volatile.CommitIndex
 
             State.updateCommitIndex newCommitIndex state
 
-    let appendConfiguration peers state =
+    let appendJointConsensus oldPeers newPeers state =
         if state.Role <> Leader then
             state
         else
-            let json = System.Text.Json.JsonSerializer.Serialize(peers)
-            let command = Constants.ConfigCommandPrefix + json
+            let command =
+                ConfigChange.ConfigCommandPrefix
+                + ConfigChange.serialize (JointChange(oldPeers, newPeers))
+
+            let newLog = Log.append state.Persistent.CurrentTerm command state.Persistent.Log
+            State.updateLog newLog state
+
+    let appendFinalConfiguration peers state =
+        if state.Role <> Leader then
+            state
+        else
+            let command =
+                ConfigChange.ConfigCommandPrefix + ConfigChange.serialize (FinalChange peers)
+
             let newLog = Log.append state.Persistent.CurrentTerm command state.Persistent.Log
             State.updateLog newLog state
 

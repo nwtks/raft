@@ -7,6 +7,7 @@
   <ItemGroup>
     <Compile Include="Types.fs" />
     <Compile Include="Log.fs" />
+    <Compile Include="ConfigChange.fs" />
     <Compile Include="State.fs" />
     <Compile Include="Election.fs" />
     <Compile Include="Replication.fs" />

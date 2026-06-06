@@ -1,12 +1,6 @@
 namespace Raft
 
 module Transport =
-    let jsonOptions =
-        let options = System.Text.Json.JsonSerializerOptions()
-        options.Converters.Add(OptionConverterFactory())
-        options.Converters.Add(RaftMessageConverter())
-        options
-
     let log msg = printfn "[Transport] %s" msg
 
     [<TailCall>]
@@ -81,7 +75,7 @@ module Transport =
                                             let msg =
                                                 System.Text.Json.JsonSerializer.Deserialize<RaftMessage>(
                                                     json,
-                                                    jsonOptions
+                                                    JsonConfig.options
                                                 )
 
                                             postMessage msg
@@ -107,7 +101,7 @@ module Transport =
                 do! client.ConnectAsync(peer.Host, peer.Port, cts.Token)
 
                 let bytes =
-                    System.Text.Json.JsonSerializer.Serialize(msg, jsonOptions)
+                    System.Text.Json.JsonSerializer.Serialize(msg, JsonConfig.options)
                     |> System.Text.Encoding.UTF8.GetBytes
 
                 let msgLen = bytes.Length

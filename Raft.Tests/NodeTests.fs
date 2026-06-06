@@ -387,7 +387,7 @@ let ``Leader RaftNode.AddPeer appends configuration entry and broadcasts to all 
 
         let finalState = node.GetState()
         Assert.Equal(1, finalState.Persistent.Log.Count)
-        Assert.StartsWith(Constants.ConfigCommandPrefix, (Map.find 1L finalState.Persistent.Log).Command)
+        Assert.StartsWith(ConfigChange.ConfigCommandPrefix, (Map.find 1L finalState.Persistent.Log).Command)
 
         Assert.Contains(transport.Messages, fun (p, _) -> p.Id = 2)
         Assert.Contains(transport.Messages, fun (p, _) -> p.Id = 3)
@@ -430,7 +430,7 @@ let ``Leader RaftNode.RemovePeer appends configuration entry and broadcasts`` ()
 
         let finalState = node.GetState()
         Assert.Equal(1, finalState.Persistent.Log.Count)
-        Assert.StartsWith(Constants.ConfigCommandPrefix, (Map.find 1L finalState.Persistent.Log).Command)
+        Assert.StartsWith(ConfigChange.ConfigCommandPrefix, (Map.find 1L finalState.Persistent.Log).Command)
 
         Assert.Contains(transport.Messages, fun (p, _) -> p.Id = 2)
     }

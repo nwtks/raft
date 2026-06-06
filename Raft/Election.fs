@@ -56,7 +56,7 @@ module Election =
         elif state.Role = Candidate && resp.VoteGranted then
             let newState = State.addVoteReceived fromNode state
 
-            if Set.count newState.VotesReceived >= State.quorumSize newState then
+            if State.hasQuorum newState.VotesReceived newState then
                 State.initLeaderState newState
             else
                 newState

@@ -11,10 +11,6 @@ type PersistentState =
       Log: Map<LogIndex, LogEntry>
       Snapshot: Snapshot option }
 
-type IPersistence =
-    abstract member Save: PersistentState -> unit
-    abstract member Load: unit -> PersistentState option
-
 type VolatileState =
     { CommitIndex: LogIndex
       LastApplied: LogIndex }
@@ -23,6 +19,10 @@ type LeaderState =
     { NextIndex: Map<NodeId, LogIndex>
       MatchIndex: Map<NodeId, LogIndex> }
 
+type ConfigPhase =
+    | SinglePhase
+    | JointPhase of oldPeers: PeerInfo list * newPeers: PeerInfo list
+
 type RaftState =
     { Role: NodeRole
       Persistent: PersistentState
@@ -30,7 +30,12 @@ type RaftState =
       LeaderState: LeaderState option
       VotesReceived: Set<NodeId>
       CurrentLeader: NodeId option
-      Config: NodeConfig }
+      Config: NodeConfig
+      ConfigPhase: ConfigPhase }
+
+type IPersistence =
+    abstract member Save: PersistentState -> unit
+    abstract member Load: unit -> PersistentState option
 
 module State =
     let init config loadedState =
@@ -43,13 +48,32 @@ module State =
                   Log = Log.empty
                   Snapshot = None }
 
+        let configPhase, updatedConfig =
+            let latestChange =
+                persistent.Log
+                |> Map.toSeq
+                |> Seq.choose (fun (_, entry) ->
+                    if entry.Command.StartsWith ConfigChange.ConfigCommandPrefix then
+                        ConfigChange.parse entry.Command
+                    else
+                        None)
+                |> Seq.tryLast
+
+            match latestChange with
+            | Some(JointChange(oldPeers, newPeers)) ->
+                let unionPeers = List.append oldPeers newPeers |> List.distinct
+                JointPhase(oldPeers, newPeers), { config with Peers = unionPeers }
+            | Some(FinalChange _)
+            | None -> SinglePhase, config
+
         { Role = Follower
           Persistent = persistent
           Volatile = { CommitIndex = 0L; LastApplied = 0L }
           LeaderState = None
           VotesReceived = Set.empty
           CurrentLeader = None
-          Config = config }
+          Config = updatedConfig
+          ConfigPhase = configPhase }
 
     let initLeaderState state =
         let nextIdx = Log.lastIndex state.Persistent.Log + 1L
@@ -147,7 +171,39 @@ module State =
 
     let updateConfig peers state =
         { state with
-            Config = { state.Config with Peers = peers } }
+            Config = { state.Config with Peers = peers }
+            ConfigPhase = SinglePhase }
 
-    let quorumSize state =
-        (List.length state.Config.Peers + 1) / 2 + 1
+    let enterJointConsensus oldPeers newPeers state =
+        let unionPeers = List.append oldPeers newPeers |> List.distinct
+
+        { state with
+            ConfigPhase = JointPhase(oldPeers, newPeers)
+            Config = { state.Config with Peers = unionPeers } }
+
+    let exitJointConsensus newPeers state =
+        { state with
+            ConfigPhase = SinglePhase
+            Config = { state.Config with Peers = newPeers } }
+
+    let hasQuorum supporters state =
+        match state.ConfigPhase with
+        | SinglePhase ->
+            let total = List.length state.Config.Peers + 1
+            Set.count supporters >= total / 2 + 1
+        | JointPhase(oldPeers, newPeers) ->
+            let oldIds =
+                oldPeers
+                |> List.map (fun p -> p.Id)
+                |> Set.ofList
+                |> Set.add state.Config.NodeId
+
+            let newIds =
+                newPeers
+                |> List.map (fun p -> p.Id)
+                |> Set.ofList
+                |> Set.add state.Config.NodeId
+
+            let inOld = Set.intersect supporters oldIds |> Set.count
+            let inNew = Set.intersect supporters newIds |> Set.count
+            inOld >= Set.count oldIds / 2 + 1 && inNew >= Set.count newIds / 2 + 1

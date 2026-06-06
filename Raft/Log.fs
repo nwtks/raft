@@ -23,8 +23,6 @@ module Log =
         |> Seq.tryFindBack (fun (_, e) -> e.Term = term)
         |> Option.map fst
 
-    let appendEntry entry log = log |> Map.add entry.Index entry
-
     let append term command log =
         let nextIndex = lastIndex log + 1L
 
@@ -33,7 +31,7 @@ module Log =
               Term = term
               Command = command }
 
-        appendEntry entry log
+        log |> Map.add entry.Index entry
 
     let entriesFrom index log =
         log |> Map.toList |> List.skipWhile (fun (k, _) -> k < index) |> List.map snd

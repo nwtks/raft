@@ -64,10 +64,13 @@ type InstallSnapshotResponse =
       Success: bool
       LastIncludedIndex: LogIndex }
 
-module Constants =
-    /// Prefix for configuration-change log entries.
-    [<Literal>]
-    let ConfigCommandPrefix = "__raft_config:"
+type RaftMessage =
+    | RequestVoteMsg of RequestVote
+    | RequestVoteResponseMsg of RequestVoteResponse
+    | AppendEntriesMsg of AppendEntries
+    | AppendEntriesResponseMsg of AppendEntriesResponse
+    | InstallSnapshotMsg of InstallSnapshot
+    | InstallSnapshotResponseMsg of InstallSnapshotResponse
 
 // ---------------------------------------------------------------
 // Configuration
@@ -83,15 +86,3 @@ type NodeConfig =
       ElectionTimeoutMinMs: int
       ElectionTimeoutMaxMs: int
       HeartbeatIntervalMs: int }
-
-// ---------------------------------------------------------------
-// Raft Messages
-// ---------------------------------------------------------------
-
-type RaftMessage =
-    | RequestVoteMsg of RequestVote
-    | RequestVoteResponseMsg of RequestVoteResponse
-    | AppendEntriesMsg of AppendEntries
-    | AppendEntriesResponseMsg of AppendEntriesResponse
-    | InstallSnapshotMsg of InstallSnapshot
-    | InstallSnapshotResponseMsg of InstallSnapshotResponse

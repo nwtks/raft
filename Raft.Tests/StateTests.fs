@@ -196,26 +196,3 @@ let ``State.updateConfig replaces peers list`` () =
     Assert.Equal(6, updated.Config.Peers[1].Id)
 
     Assert.Equal(2, dummyConfig.Peers.Length)
-
-[<Fact>]
-let ``State.quorumSize returns majority for 3-node cluster`` () =
-    let state = State.init dummyConfig None
-    Assert.Equal(2, State.quorumSize state)
-
-[<Fact>]
-let ``State.quorumSize returns majority for 1-node cluster`` () =
-    let state = State.init dummyConfigStandalone None
-    Assert.Equal(1, State.quorumSize state)
-
-[<Fact>]
-let ``State.quorumSize returns majority for 5-node cluster`` () =
-    let config5 =
-        { dummyConfig with
-            Peers =
-                [ { Id = 2; Host = ""; Port = 0 }
-                  { Id = 3; Host = ""; Port = 0 }
-                  { Id = 4; Host = ""; Port = 0 }
-                  { Id = 5; Host = ""; Port = 0 } ] }
-
-    let state = State.init config5 None
-    Assert.Equal(3, State.quorumSize state)

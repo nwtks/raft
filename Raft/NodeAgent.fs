@@ -9,11 +9,19 @@ module NodeAgent =
             let next = lastApplied + 1L
 
             match Log.getEntry next state.Persistent.Log with
-            | Some entry when entry.Command.StartsWith Constants.ConfigCommandPrefix ->
-                let json = entry.Command.Substring Constants.ConfigCommandPrefix.Length
-                let newPeers = System.Text.Json.JsonSerializer.Deserialize<PeerInfo list> json
-                let state2 = State.updateConfig newPeers state
-                loopApplyCommitted onApply state2 next
+            | Some entry when entry.Command.StartsWith ConfigChange.ConfigCommandPrefix ->
+                match ConfigChange.parse entry.Command with
+                | Some(JointChange(oldPeers, newPeers)) ->
+                    let state2 = State.enterJointConsensus oldPeers newPeers state
+                    loopApplyCommitted onApply state2 next
+                | Some(FinalChange newPeers) ->
+                    let state2 = State.exitJointConsensus newPeers state
+                    loopApplyCommitted onApply state2 next
+                | None ->
+                    let json = entry.Command.Substring ConfigChange.ConfigCommandPrefix.Length
+                    let newPeers = System.Text.Json.JsonSerializer.Deserialize<PeerInfo list> json
+                    let state2 = State.updateConfig newPeers state
+                    loopApplyCommitted onApply state2 next
             | Some entry ->
                 onApply entry
                 loopApplyCommitted onApply state next
@@ -38,7 +46,7 @@ module NodeAgent =
             NodeBroadcaster.broadcastRequestVote ctx.Config ctx.Transport newState
 
             let finalState =
-                if Set.count newState.VotesReceived >= State.quorumSize newState then
+                if State.hasQuorum newState.VotesReceived newState then
                     let state = State.initLeaderState newState
                     NodeBroadcaster.broadcastHeartbeat ctx.Config ctx.Transport state
                     state
@@ -112,6 +120,20 @@ module NodeAgent =
             saveIfChanged ctx state2
             state2, false
 
+    let tryFinalizeConfiguration state =
+        match state.ConfigPhase, state.Role with
+        | JointPhase(_, newPeers), Leader ->
+            let lastEntry =
+                Log.getEntry (Log.lastIndex state.Persistent.Log) state.Persistent.Log
+
+            match lastEntry with
+            | Some entry when entry.Command.StartsWith ConfigChange.ConfigCommandPrefix ->
+                match ConfigChange.parse entry.Command with
+                | Some(FinalChange _) -> state
+                | _ -> Replication.appendFinalConfiguration newPeers state
+            | _ -> Replication.appendFinalConfiguration newPeers state
+        | _ -> state
+
     let handleLocalMessage ctx =
         function
         | ClientCommand(cmd, replyChannel) ->
@@ -120,19 +142,21 @@ module NodeAgent =
                 saveIfChanged ctx state
                 NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state
                 replyChannel.Reply true
-                applyCommitted ctx.OnApply state
+                tryFinalizeConfiguration (applyCommitted ctx.OnApply state)
             else
                 replyChannel.Reply false
                 ctx.State
         | AddPeer(peerInfo, replyChannel) ->
             if ctx.State.Role = Leader then
-                let newPeers =
-                    if ctx.State.Config.Peers |> List.exists (fun p -> p.Id = peerInfo.Id) then
-                        ctx.State.Config.Peers
-                    else
-                        peerInfo :: ctx.State.Config.Peers
+                let oldPeers = ctx.State.Config.Peers
 
-                let state = Replication.appendConfiguration newPeers ctx.State
+                let newPeers =
+                    if oldPeers |> List.exists (fun p -> p.Id = peerInfo.Id) then
+                        oldPeers
+                    else
+                        peerInfo :: oldPeers
+
+                let state = Replication.appendJointConsensus oldPeers newPeers ctx.State
                 saveIfChanged ctx state
 
                 let state2 =
@@ -150,18 +174,19 @@ module NodeAgent =
 
                 NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state2
                 replyChannel.Reply true
-                applyCommitted ctx.OnApply state2
+                tryFinalizeConfiguration (applyCommitted ctx.OnApply state2)
             else
                 replyChannel.Reply false
                 ctx.State
         | RemovePeer(peerId, replyChannel) ->
             if ctx.State.Role = Leader then
-                let newPeers = ctx.State.Config.Peers |> List.filter (fun p -> p.Id <> peerId)
-                let state = Replication.appendConfiguration newPeers ctx.State
+                let oldPeers = ctx.State.Config.Peers
+                let newPeers = oldPeers |> List.filter (fun p -> p.Id <> peerId)
+                let state = Replication.appendJointConsensus oldPeers newPeers ctx.State
                 saveIfChanged ctx state
                 NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state
                 replyChannel.Reply true
-                applyCommitted ctx.OnApply state
+                tryFinalizeConfiguration (applyCommitted ctx.OnApply state)
             else
                 replyChannel.Reply false
                 ctx.State
@@ -186,7 +211,8 @@ module NodeAgent =
             else
                 ctx.ElectionTimer, ctx.HeartbeatTimer
 
-        applyCommitted ctx.OnApply newState, electionTimer, heartbeatTimer
+        let appliedState = applyCommitted ctx.OnApply newState
+        tryFinalizeConfiguration appliedState, electionTimer, heartbeatTimer
 
     [<TailCall>]
     let rec agentLoop ctx =
