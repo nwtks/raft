@@ -153,6 +153,8 @@ module Replication =
     let handleAppendEntriesResponse (resp: AppendEntriesResponse) state =
         if resp.FollowerTerm > state.Persistent.CurrentTerm then
             State.updateTerm resp.FollowerTerm state
+        elif resp.FollowerTerm < state.Persistent.CurrentTerm then
+            state
         else
             match state.LeaderState with
             | None -> state
