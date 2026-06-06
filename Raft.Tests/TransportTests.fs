@@ -2,25 +2,12 @@ module Raft.Tests.TransportTests
 
 open Xunit
 open Raft
-
-let dummyConfig port =
-    { NodeId = 1
-      Host = "127.0.0.1"
-      Port = port
-      Peers = []
-      ElectionTimeoutMinMs = 1500
-      ElectionTimeoutMaxMs = 3000
-      HeartbeatIntervalMs = 500 }
-
-let dummyPeer port =
-    { Id = 2
-      Host = "127.0.0.1"
-      Port = port }
+open TestHelpers
 
 [<Fact>]
 let ``TcpTransport.SendMessage triggers listener callback with correct message on loopback`` () =
     let port = 15001
-    let config = dummyConfig port
+    let config = dummyConfigWithPort port
     let cts = new System.Threading.CancellationTokenSource()
     let tcs = System.Threading.Tasks.TaskCompletionSource<RaftMessage>()
     let postMessage msg = tcs.TrySetResult msg |> ignore

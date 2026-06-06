@@ -2,19 +2,11 @@ module Raft.Tests.StateTests
 
 open Xunit
 open Raft
-
-let dummyConfig =
-    { NodeId = 1
-      Host = "127.0.0.1"
-      Port = 15001
-      Peers = []
-      ElectionTimeoutMinMs = 1500
-      ElectionTimeoutMaxMs = 3000
-      HeartbeatIntervalMs = 500 }
+open TestHelpers
 
 [<Fact>]
 let ``State.init without persisted state creates default PersistentState with term 0`` () =
-    let state = State.init dummyConfig None
+    let state = State.init dummyConfigStandalone None
 
     Assert.Equal(Follower, state.Role)
     Assert.Equal(0L, state.Persistent.CurrentTerm)
@@ -30,7 +22,7 @@ let ``State.init with persisted state restores CurrentTerm, VotedFor, and Log co
           VotedFor = Some 2
           Log = [ { Index = 1L; Term = 4L; Command = "x" } ] }
 
-    let state = State.init dummyConfig (Some loaded)
+    let state = State.init dummyConfigStandalone (Some loaded)
 
     Assert.Equal(5L, state.Persistent.CurrentTerm)
     Assert.Equal(Some 2, state.Persistent.VotedFor)

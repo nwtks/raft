@@ -2,21 +2,7 @@ module Raft.Tests.ElectionTests
 
 open Xunit
 open Raft
-
-let dummyConfig =
-    { NodeId = 1
-      Host = "localhost"
-      Port = 5001
-      Peers =
-        [ { Id = 2
-            Host = "localhost"
-            Port = 5002 }
-          { Id = 3
-            Host = "localhost"
-            Port = 5003 } ]
-      ElectionTimeoutMinMs = 1500
-      ElectionTimeoutMaxMs = 3000
-      HeartbeatIntervalMs = 500 }
+open TestHelpers
 
 [<Fact>]
 let ``Election.startElection transitions node to Candidate, increments term, and votes for self`` () =
