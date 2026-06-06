@@ -1,6 +1,14 @@
 namespace Raft
 
-type RaftNode(config: NodeConfig, transport: ITransport, persistence: IPersistence, onApply: LogEntry -> unit) =
+type RaftNode
+    (
+        config: NodeConfig,
+        transport: ITransport,
+        persistence: IPersistence,
+        onApply: LogEntry -> unit,
+        ?onInstallSnapshot: string -> unit
+    ) =
+    let onInstallSnapshotFn = defaultArg onInstallSnapshot ignore
     let cts = new System.Threading.CancellationTokenSource()
 
     let agent =
@@ -12,6 +20,7 @@ type RaftNode(config: NodeConfig, transport: ITransport, persistence: IPersisten
                   Transport = transport
                   Persistence = persistence
                   OnApply = onApply
+                  OnInstallSnapshot = onInstallSnapshotFn
                   Inbox = inbox
                   State = State.init config loadedState
                   ElectionTimer = None
@@ -34,6 +43,9 @@ type RaftNode(config: NodeConfig, transport: ITransport, persistence: IPersisten
 
     member _.SubmitCommand cmd =
         agent.PostAndReply(fun ch -> RaftRPC(ClientCommand(cmd, Some ch)))
+
+    member _.SubmitTakeSnapshot data =
+        agent.PostAndReply(fun ch -> TakeSnapshot(data, ch))
 
     member _.GetState() = agent.PostAndReply GetState
 

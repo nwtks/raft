@@ -7,15 +7,35 @@ module Replication =
         | Some ls ->
             let nextIdx = ls.NextIndex |> Map.tryFind followerId |> Option.defaultValue 1L
             let prevLogIndex = nextIdx - 1L
-            let prevLogTerm = Log.termAt prevLogIndex state.Persistent.Log
 
-            Some
-                { LeaderTerm = state.Persistent.CurrentTerm
-                  LeaderId = state.Config.NodeId
-                  PrevLogIndex = prevLogIndex
-                  PrevLogTerm = prevLogTerm
-                  Entries = entries nextIdx
-                  LeaderCommit = state.Volatile.CommitIndex }
+            match state.Persistent.Snapshot with
+            | Some snap when prevLogIndex < snap.LastIncludedIndex -> None
+            | _ ->
+                let prevLogTerm = Log.termAt prevLogIndex state.Persistent.Log
+
+                Some
+                    { LeaderTerm = state.Persistent.CurrentTerm
+                      LeaderId = state.Config.NodeId
+                      PrevLogIndex = prevLogIndex
+                      PrevLogTerm = prevLogTerm
+                      Entries = entries nextIdx
+                      LeaderCommit = state.Volatile.CommitIndex }
+
+    let createInstallSnapshot followerId state =
+        match state.LeaderState, state.Persistent.Snapshot with
+        | Some ls, Some snap ->
+            let nextIdx = ls.NextIndex |> Map.tryFind followerId |> Option.defaultValue 1L
+
+            if nextIdx <= snap.LastIncludedIndex + 1L then
+                Some
+                    { LeaderTerm = state.Persistent.CurrentTerm
+                      LeaderId = state.Config.NodeId
+                      LastIncludedIndex = snap.LastIncludedIndex
+                      LastIncludedTerm = snap.LastIncludedTerm
+                      Data = snap.StateMachineData }
+            else
+                None
+        | _ -> None
 
     let createAppendEntries followerId state =
         createEntries (fun index -> Log.entriesFrom index state.Persistent.Log) followerId state
@@ -23,7 +43,7 @@ module Replication =
     let createHeartbeat followerId state =
         createEntries (fun _ -> []) followerId state
 
-    let handleAppendEntries ae state =
+    let handleAppendEntries (ae: AppendEntries) state =
         if ae.LeaderTerm < state.Persistent.CurrentTerm then
             let response =
                 { FollowerTerm = state.Persistent.CurrentTerm
@@ -95,7 +115,62 @@ module Replication =
 
                 state2, response
 
-    let handleAppendEntriesResponse resp state =
+    let handleInstallSnapshot snap state =
+        if snap.LeaderTerm < state.Persistent.CurrentTerm then
+            state,
+            { FollowerTerm = state.Persistent.CurrentTerm
+              FollowerId = state.Config.NodeId
+              Success = false
+              LastIncludedIndex = 0L }
+        else
+            let state2 = State.followLeader snap.LeaderTerm snap.LeaderId state
+
+            let newLog =
+                Log.trim snap.LastIncludedIndex snap.LastIncludedTerm state2.Persistent.Log
+
+            let newCommitIndex = max state2.Volatile.CommitIndex snap.LastIncludedIndex
+            let newLastApplied = max state2.Volatile.LastApplied snap.LastIncludedIndex
+
+            let snapshot =
+                { LastIncludedIndex = snap.LastIncludedIndex
+                  LastIncludedTerm = snap.LastIncludedTerm
+                  StateMachineData = snap.Data }
+
+            let newState =
+                { state2 with
+                    Persistent =
+                        { state2.Persistent with
+                            Log = newLog
+                            Snapshot = Some snapshot }
+                    Volatile =
+                        { state2.Volatile with
+                            CommitIndex = newCommitIndex
+                            LastApplied = newLastApplied } }
+
+            newState,
+            { FollowerTerm = newState.Persistent.CurrentTerm
+              FollowerId = state.Config.NodeId
+              Success = true
+              LastIncludedIndex = snap.LastIncludedIndex }
+
+    let handleInstallSnapshotResponse resp state =
+        if resp.FollowerTerm > state.Persistent.CurrentTerm then
+            State.updateTerm resp.FollowerTerm state
+        else
+            match state.LeaderState with
+            | None -> state
+            | Some ls ->
+                if resp.Success then
+                    let newMatchIndex = ls.MatchIndex |> Map.add resp.FollowerId resp.LastIncludedIndex
+
+                    let newNextIndex =
+                        ls.NextIndex |> Map.add resp.FollowerId (resp.LastIncludedIndex + 1L)
+
+                    State.updateLeaderState newNextIndex newMatchIndex state
+                else
+                    state
+
+    let handleAppendEntriesResponse (resp: AppendEntriesResponse) state =
         if resp.FollowerTerm > state.Persistent.CurrentTerm then
             State.updateTerm resp.FollowerTerm state
         else

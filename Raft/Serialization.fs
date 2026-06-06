@@ -57,6 +57,16 @@ type RaftMessageConverter() =
                 System.Text.Json.JsonSerializer.Deserialize<AppendEntriesResponse>(fields.[0].GetRawText(), options)
 
             AppendEntriesResponseMsg payload
+        | "InstallSnapshotMsg" ->
+            let payload =
+                System.Text.Json.JsonSerializer.Deserialize<InstallSnapshot>(fields.[0].GetRawText(), options)
+
+            InstallSnapshotMsg payload
+        | "InstallSnapshotResponseMsg" ->
+            let payload =
+                System.Text.Json.JsonSerializer.Deserialize<InstallSnapshotResponse>(fields.[0].GetRawText(), options)
+
+            InstallSnapshotResponseMsg payload
         | _ -> failwithf "Unknown message case: %s" caseName
 
     override _.Write(writer, value, options) =
@@ -82,6 +92,16 @@ type RaftMessageConverter() =
             writer.WriteString("Case", "AppendEntriesResponseMsg")
             writer.WriteStartArray "Fields"
             System.Text.Json.JsonSerializer.Serialize(writer, aer, options)
+            writer.WriteEndArray()
+        | InstallSnapshotMsg snap ->
+            writer.WriteString("Case", "InstallSnapshotMsg")
+            writer.WriteStartArray "Fields"
+            System.Text.Json.JsonSerializer.Serialize(writer, snap, options)
+            writer.WriteEndArray()
+        | InstallSnapshotResponseMsg snapResp ->
+            writer.WriteString("Case", "InstallSnapshotResponseMsg")
+            writer.WriteStartArray "Fields"
+            System.Text.Json.JsonSerializer.Serialize(writer, snapResp, options)
             writer.WriteEndArray()
         | ClientCommand _ -> failwith "ClientCommand cannot be serialized."
 

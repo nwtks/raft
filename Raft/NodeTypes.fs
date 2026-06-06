@@ -5,6 +5,7 @@ type NodeMessage =
     | ElectionTimeout
     | HeartbeatTimeout
     | GetState of AsyncReplyChannel<RaftState>
+    | TakeSnapshot of data: string * AsyncReplyChannel<unit>
     | Shutdown of AsyncReplyChannel<unit>
 
 type ITransport =
@@ -21,6 +22,7 @@ type NodeContext =
       Transport: ITransport
       Persistence: IPersistence
       OnApply: LogEntry -> unit
+      OnInstallSnapshot: string -> unit
       Inbox: MailboxProcessor<NodeMessage>
       State: RaftState
       ElectionTimer: System.Threading.Timer option

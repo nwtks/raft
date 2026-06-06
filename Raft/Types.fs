@@ -51,11 +51,26 @@ type AppendEntriesResponse =
       ConflictTerm: Term
       ConflictIndex: LogIndex }
 
+type InstallSnapshot =
+    { LeaderTerm: Term
+      LeaderId: NodeId
+      LastIncludedIndex: LogIndex
+      LastIncludedTerm: Term
+      Data: string }
+
+type InstallSnapshotResponse =
+    { FollowerTerm: Term
+      FollowerId: NodeId
+      Success: bool
+      LastIncludedIndex: LogIndex }
+
 type RaftMessage =
     | RequestVoteMsg of RequestVote
     | RequestVoteResponseMsg of RequestVoteResponse
     | AppendEntriesMsg of AppendEntries
     | AppendEntriesResponseMsg of AppendEntriesResponse
+    | InstallSnapshotMsg of InstallSnapshot
+    | InstallSnapshotResponseMsg of InstallSnapshotResponse
     | ClientCommand of command: string * AsyncReplyChannel<bool> option
 
 // ---------------------------------------------------------------

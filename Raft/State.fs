@@ -1,9 +1,15 @@
 namespace Raft
 
+type Snapshot =
+    { LastIncludedIndex: LogIndex
+      LastIncludedTerm: Term
+      StateMachineData: string }
+
 type PersistentState =
     { CurrentTerm: Term
       VotedFor: NodeId option
-      Log: Map<LogIndex, LogEntry> }
+      Log: Map<LogIndex, LogEntry>
+      Snapshot: Snapshot option }
 
 type IPersistence =
     abstract member Save: PersistentState -> unit
@@ -34,7 +40,8 @@ module State =
             | None ->
                 { CurrentTerm = 0L
                   VotedFor = None
-                  Log = Log.empty }
+                  Log = Log.empty
+                  Snapshot = None }
 
         { Role = Follower
           Persistent = persistent
@@ -119,6 +126,24 @@ module State =
     let addVoteReceived nodeId state =
         { state with
             VotesReceived = state.VotesReceived |> Set.add nodeId }
+
+    let takeSnapshot lastAppliedIndex lastAppliedTerm data state =
+        let newLog = Log.trim lastAppliedIndex lastAppliedTerm state.Persistent.Log
+
+        let snapshot: Snapshot =
+            { LastIncludedIndex = lastAppliedIndex
+              LastIncludedTerm = lastAppliedTerm
+              StateMachineData = data }
+
+        { state with
+            Persistent =
+                { state.Persistent with
+                    Log = newLog
+                    Snapshot = Some snapshot }
+            Volatile =
+                { state.Volatile with
+                    CommitIndex = max state.Volatile.CommitIndex lastAppliedIndex
+                    LastApplied = max state.Volatile.LastApplied lastAppliedIndex } }
 
     let quorumSize state =
         (List.length state.Config.Peers + 1) / 2 + 1

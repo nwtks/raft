@@ -3,15 +3,6 @@ namespace Raft
 module NodeAgent =
     let log msg = printfn "[Node] %s" msg
 
-    let sendAsync (transport: ITransport) peer msg =
-        async {
-            try
-                do! transport.SendMessage peer msg |> Async.AwaitTask
-            with ex ->
-                log $"Failed to send to {peer.Id}: {ex.Message}"
-        }
-        |> Async.Start
-
     [<TailCall>]
     let rec loopApplyCommitted onApply state lastApplied =
         if lastApplied < state.Volatile.CommitIndex then
@@ -61,7 +52,7 @@ module NodeAgent =
             saveIfChanged ctx state
 
             match ctx.Config.Peers |> List.tryFind (fun p -> p.Id = requestVote.CandidateId) with
-            | Some peer -> sendAsync ctx.Transport peer (RequestVoteResponseMsg response)
+            | Some peer -> NodeBroadcaster.sendAsync ctx.Transport peer (RequestVoteResponseMsg response)
             | None -> log $"Warning: Unknown candidate {requestVote.CandidateId} for RequestVote response"
 
             state, true
@@ -74,12 +65,30 @@ module NodeAgent =
             saveIfChanged ctx state
 
             match ctx.Config.Peers |> List.tryFind (fun p -> p.Id = appendEntries.LeaderId) with
-            | Some peer -> sendAsync ctx.Transport peer (AppendEntriesResponseMsg response)
+            | Some peer -> NodeBroadcaster.sendAsync ctx.Transport peer (AppendEntriesResponseMsg response)
             | None -> log $"Warning: Unknown leader {appendEntries.LeaderId} for AppendEntries response"
 
             state, true
         | AppendEntriesResponseMsg response ->
             let state = Replication.handleAppendEntriesResponse response ctx.State
+            let state2 = Replication.advanceCommitIndex state
+            saveIfChanged ctx state2
+            state2, false
+        | InstallSnapshotMsg snap ->
+            let state, response = Replication.handleInstallSnapshot snap ctx.State
+            saveIfChanged ctx state
+
+            if response.Success then
+                let snapData = snap.Data
+                ctx.OnInstallSnapshot snapData
+
+            match ctx.Config.Peers |> List.tryFind (fun p -> p.Id = snap.LeaderId) with
+            | Some peer -> NodeBroadcaster.sendAsync ctx.Transport peer (InstallSnapshotResponseMsg response)
+            | None -> log $"Warning: Unknown leader {snap.LeaderId} for InstallSnapshot response"
+
+            state, true
+        | InstallSnapshotResponseMsg response ->
+            let state = Replication.handleInstallSnapshotResponse response ctx.State
             let state2 = Replication.advanceCommitIndex state
             saveIfChanged ctx state2
             state2, false
@@ -147,6 +156,13 @@ module NodeAgent =
             | GetState ch ->
                 ch.Reply ctx.State
                 return! agentLoop ctx
+            | TakeSnapshot(data, ch) ->
+                let lastApplied = ctx.State.Volatile.LastApplied
+                let lastTerm = Log.termAt lastApplied ctx.State.Persistent.Log
+                let state = State.takeSnapshot lastApplied lastTerm data ctx.State
+                saveIfChanged ctx state
+                ch.Reply()
+                return! agentLoop { ctx with State = state }
             | Shutdown ch ->
                 NodeTimer.disposeTimer ctx.ElectionTimer
                 NodeTimer.disposeTimer ctx.HeartbeatTimer

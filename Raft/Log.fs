@@ -53,3 +53,13 @@ module Log =
             | None -> entry :: rest |> List.fold (fun m e -> Map.add e.Index e m) log
 
     let mergeEntries entries log = _merge log entries
+
+    let trim lastIncludedIndex lastIncludedTerm log =
+        let sentinel =
+            { Index = lastIncludedIndex
+              Term = lastIncludedTerm
+              Command = "" }
+
+        log
+        |> Map.filter (fun k _ -> k > lastIncludedIndex)
+        |> Map.add lastIncludedIndex sentinel

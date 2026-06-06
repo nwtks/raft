@@ -22,7 +22,8 @@ let ``Replication.handleAppendEntries rejects request when leader term is lower 
             Persistent =
                 { CurrentTerm = 2L
                   VotedFor = None
-                  Log = Map.empty } }
+                  Log = Map.empty
+                  Snapshot = None } }
 
     let ae =
         { LeaderTerm = 1L
@@ -44,7 +45,8 @@ let ``Replication.handleAppendEntries appends entries and updates commit index o
             Persistent =
                 { CurrentTerm = 1L
                   VotedFor = None
-                  Log = Map.empty } }
+                  Log = Map.empty
+                  Snapshot = None } }
 
     let ae =
         { LeaderTerm = 1L
@@ -67,7 +69,8 @@ let ``Replication.handleAppendEntries rejects when PrevLogIndex term mismatches 
             Persistent =
                 { CurrentTerm = 2L
                   VotedFor = None
-                  Log = logFromList [ dummyEntry ] } }
+                  Log = logFromList [ dummyEntry ]
+                  Snapshot = None } }
 
     let ae =
         { LeaderTerm = 2L
@@ -88,7 +91,8 @@ let ``Replication.handleAppendEntries rejects when PrevLogIndex exceeds follower
             Persistent =
                 { CurrentTerm = 2L
                   VotedFor = None
-                  Log = logFromList [ { Index = 1L; Term = 1L; Command = "x" } ] } }
+                  Log = logFromList [ { Index = 1L; Term = 1L; Command = "x" } ]
+                  Snapshot = None } }
 
     let ae =
         { LeaderTerm = 2L
@@ -145,7 +149,8 @@ let ``Replication.handleAppendEntriesResponse decrements NextIndex on failure to
             Persistent =
                 { CurrentTerm = 1L
                   VotedFor = None
-                  Log = logFromList [ dummyEntry ] }
+                  Log = logFromList [ dummyEntry ]
+                  Snapshot = None }
             LeaderState = Some leaderState }
 
     let resp =
@@ -176,7 +181,8 @@ let ``Replication.handleAppendEntriesResponse uses ConflictTerm optimization whe
                     logFromList
                         [ { Index = 1L; Term = 1L; Command = "x" }
                           { Index = 2L; Term = 1L; Command = "y" }
-                          { Index = 3L; Term = 1L; Command = "z" } ] }
+                          { Index = 3L; Term = 1L; Command = "z" } ]
+                  Snapshot = None }
             LeaderState = Some leaderState }
 
     let resp =
@@ -202,7 +208,8 @@ let ``Replication.handleAppendEntriesResponse uses ConflictIndex when leader has
             Persistent =
                 { CurrentTerm = 2L
                   VotedFor = None
-                  Log = logFromList [ { Index = 1L; Term = 1L; Command = "x" } ] }
+                  Log = logFromList [ { Index = 1L; Term = 1L; Command = "x" } ]
+                  Snapshot = None }
             LeaderState = Some leaderState }
 
     let resp =
@@ -228,7 +235,8 @@ let ``Replication.advanceCommitIndex advances commit index when majority of peer
             Persistent =
                 { CurrentTerm = 1L
                   VotedFor = None
-                  Log = logFromList [ dummyEntry ] }
+                  Log = logFromList [ dummyEntry ]
+                  Snapshot = None }
             LeaderState = Some leaderState
             Volatile = { CommitIndex = 0L; LastApplied = 0L } }
 
@@ -256,7 +264,8 @@ let ``Replication.advanceCommitIndex does not advance when term does not match c
                   Log =
                     logFromList
                         [ { Index = 1L; Term = 1L; Command = "a" }
-                          { Index = 2L; Term = 1L; Command = "b" } ] }
+                          { Index = 2L; Term = 1L; Command = "b" } ]
+                  Snapshot = None }
             LeaderState = Some leaderState
             Volatile = { CommitIndex = 0L; LastApplied = 0L } }
 

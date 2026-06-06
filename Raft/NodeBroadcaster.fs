@@ -4,13 +4,16 @@ module NodeBroadcaster =
     let log msg = printfn "[Node] %s" msg
 
     let sendAsync (transport: ITransport) peer msg =
-        async {
-            try
-                do! transport.SendMessage peer msg |> Async.AwaitTask
-            with ex ->
-                log $"Failed to send to {peer.Id}: {ex.Message}"
-        }
-        |> Async.Start
+        let task = transport.SendMessage peer msg
+
+        if task.IsCompleted then
+            if task.IsFaulted then
+                log $"Failed to send to {peer.Id}: {task.Exception.InnerException.Message}"
+        else
+            task.ContinueWith(fun (t: System.Threading.Tasks.Task) ->
+                if t.IsFaulted then
+                    log $"Failed to send to {peer.Id}: {t.Exception.InnerException.Message}")
+            |> ignore
 
     let broadcastRequestVote config (transport: ITransport) state =
         let requestVote = Election.createRequestVote state
@@ -28,4 +31,7 @@ module NodeBroadcaster =
         for peer in config.Peers do
             match Replication.createAppendEntries peer.Id state with
             | Some ae -> sendAsync transport peer (AppendEntriesMsg ae)
-            | None -> ()
+            | None ->
+                match Replication.createInstallSnapshot peer.Id state with
+                | Some snap -> sendAsync transport peer (InstallSnapshotMsg snap)
+                | None -> ()

@@ -20,7 +20,8 @@ let ``State.init with persisted state restores CurrentTerm, VotedFor, and Log co
     let loaded: PersistentState =
         { CurrentTerm = 5L
           VotedFor = Some 2
-          Log = logFromList [ { Index = 1L; Term = 4L; Command = "x" } ] }
+          Log = logFromList [ { Index = 1L; Term = 4L; Command = "x" } ]
+          Snapshot = None }
 
     let state = State.init dummyConfigStandalone (Some loaded)
 

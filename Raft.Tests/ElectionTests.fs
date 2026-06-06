@@ -23,7 +23,8 @@ let ``Election.startElection increments term from non-zero term`` () =
             Persistent =
                 { CurrentTerm = 5L
                   VotedFor = None
-                  Log = Map.empty } }
+                  Log = Map.empty
+                  Snapshot = None } }
 
     let newState = Election.startElection state
     Assert.Equal(Candidate, newState.Role)
@@ -52,7 +53,8 @@ let ``Election.handleRequestVote rejects vote when candidate term is lower than 
             Persistent =
                 { CurrentTerm = 2L
                   VotedFor = None
-                  Log = Map.empty } }
+                  Log = Map.empty
+                  Snapshot = None } }
 
     let rv =
         { CandidateTerm = 1L
@@ -72,7 +74,8 @@ let ``Election.handleRequestVote grants vote again when already voted for the sa
             Persistent =
                 { CurrentTerm = 1L
                   VotedFor = Some 2
-                  Log = Map.empty } }
+                  Log = Map.empty
+                  Snapshot = None } }
 
     let rv =
         { CandidateTerm = 1L
@@ -90,7 +93,8 @@ let ``Election.handleRequestVote rejects when candidate log is behind`` () =
             Persistent =
                 { CurrentTerm = 1L
                   VotedFor = None
-                  Log = logFromList [ { Index = 1L; Term = 1L; Command = "x" } ] } }
+                  Log = logFromList [ { Index = 1L; Term = 1L; Command = "x" } ]
+                  Snapshot = None } }
 
     let rv =
         { CandidateTerm = 2L
