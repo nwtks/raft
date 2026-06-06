@@ -87,6 +87,7 @@ module NodeAgent =
             state2, false
         | InstallSnapshotMsg snap ->
             let state, response = Replication.handleInstallSnapshot snap ctx.State
+            saveIfChanged ctx state
 
             if response.Success then
                 let snapData = snap.Data
@@ -94,14 +95,11 @@ module NodeAgent =
                 async {
                     try
                         ctx.OnInstallSnapshot snapData
-                        saveIfChanged ctx state
                     with ex ->
                         log
                             $"CRITICAL: Snapshot apply failed at index {snap.LastIncludedIndex}: {ex.Message}. Node may require restart."
                 }
                 |> Async.Start
-            else
-                saveIfChanged ctx state
 
             match ctx.Config.Peers |> List.tryFind (fun p -> p.Id = snap.LeaderId) with
             | Some peer -> NodeBroadcaster.sendAsync ctx.Transport peer (InstallSnapshotResponseMsg response)
