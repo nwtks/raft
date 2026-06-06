@@ -10,7 +10,8 @@ This project implements the core mechanics of Raft — Leader Election and Log R
 
 - **Leader Election:** Randomized election timeouts, `RequestVote` RPC handling, and dynamic leader promotion on majority vote.
 - **Log Replication:** `AppendEntries` RPC handling, log conflict resolution via `mergeEntries`, and commit index advancement.
-- **Actor Model Design:** Non-blocking, thread-safe state machine using F#'s `MailboxProcessor` (`Node.fs`). State is fully immutable; each message handler returns a new `RaftState` threaded through a tail-recursive `agentLoop`.
+- **Actor Model Design:** Non-blocking, thread-safe state machine using F#'s `MailboxProcessor` (`NodeAgent.fs`). State is fully immutable; each message handler returns a new `RaftState` threaded through a tail-recursive `agentLoop`.
+- **Snapshot & Log Compaction:** `InstallSnapshot` RPC support with `OnInstallSnapshot` callback for state machine synchronization and log trimming.
 - **TCP Transport Layer:** Custom JSON-based RPC serialization over raw TCP sockets with length-prefixed framing and hand-written `System.Text.Json` converters (`Transport.fs`, `Serialization.fs`).
 - **Crash Recovery & Persistence:** Atomic disk persistence for `PersistentState` (`CurrentTerm`, `VotedFor`, `Log`) via a `.tmp`-swap write, ensuring state integrity across restarts (`Persistence.fs`).
 - **Interactive Cluster Demo:** A 3-node Key-Value Store (KVS) cluster demo with `put`, `get`, `state`, and `quit` commands (`Raft.App`).
@@ -25,7 +26,12 @@ Raft/               # Core library (OutputType: Library)
 ├── State.fs        # RaftState, PersistentState, VolatileState, LeaderState; IPersistence interface
 ├── Election.fs     # RequestVote RPC & quorum logic
 ├── Replication.fs  # AppendEntries RPC & commit index advancement
-├── Node.fs         # MailboxProcessor actor, ITransport interface, timer management
+├── NodeTypes.fs    # NodeMessage DU, ITransport interface, NodeContext record
+├── NodeTimer.fs    # Election / heartbeat timer management
+├── NodeBroadcaster.fs # Outbound message broadcasting
+├── NodeAgent.fs    # Core agent loop (MailboxProcessor), message handlers, applyCommitted
+├── Node.fs         # RaftNode public API class (constructor, SubmitCommand, GetState, etc.)
+├── Serialization.fs # Custom System.Text.Json converters (RaftMessageConverter, OptionConverterFactory)
 ├── Transport.fs    # Asynchronous TCP transport (TcpTransport)
 └── Persistence.fs  # Atomic disk persistence (FilePersistence)
 
@@ -37,6 +43,7 @@ Raft.Tests/         # xunit.v3 test suite
 ├── StateTests.fs
 ├── ElectionTests.fs
 ├── ReplicationTests.fs
+├── SerializationTests.fs
 ├── IntegrationTests.fs  # Pure-function end-to-end scenarios (no TCP, no actors)
 ├── NodeTests.fs         # RaftNode actor tests (MockTransport / MockPersistence)
 ├── TransportTests.fs    # TcpTransport loopback tests

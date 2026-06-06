@@ -26,36 +26,54 @@ This file provides guidance for AI agents working in this repository.
 | `State.fs` | `PersistentState`, `VolatileState`, `LeaderState`, `RaftState`; `IPersistence` interface; pure state-transition helpers |
 | `Election.fs` | `startElection`, `createRequestVote`, `handleRequestVote`, `handleVoteResponse`; quorum promotion to Leader |
 | `Replication.fs` | `createAppendEntries`, `createHeartbeat`, `handleAppendEntries`, `handleAppendEntriesResponse`, `advanceCommitIndex`, `appendCommand` |
-| `Node.fs` | `ITransport` interface; `Node.Context` record; `RaftNode` actor (`MailboxProcessor`); `agentLoop`; timer management |
+| `NodeTypes.fs` | `NodeMessage` discriminated union; `ITransport` interface; `NodeContext` record (threaded through agent loop) |
+| `NodeTimer.fs` | Timer management: `resetElectionTimer`, `resetHeartbeatTimer`, `stopTimer`, `disposeTimer` |
+| `NodeBroadcaster.fs` | Outbound message broadcasting: `broadcastRequestVote`, `broadcastHeartbeat`, `broadcastAppendEntries`, `sendAsync` |
+| `NodeAgent.fs` | Core agent loop: `agentLoop`, `handleRaftMessage`, `handleLocalMessage`, `receiveElectionTimeout`, `receiveHeartbeatTimeout`, `applyCommitted`, `saveIfChanged` |
+| `Node.fs` | `RaftNode` public API class: constructor, `SubmitCommand`, `GetState`, `AddPeer`, `RemovePeer`, `Dispose` |
+| `Serialization.fs` | Custom `System.Text.Json` converters: `RaftMessageConverter`, `OptionConverterFactory` |
 | `Transport.fs` | `TcpTransport`: async TCP listener + fire-and-forget sender using JSON over raw TCP |
 | `Persistence.fs` | `FilePersistence`: atomic disk writes to `state_{id}.json` via a `.tmp` swap |
 
 ## Architecture
 
 ```
-RaftNode (MailboxProcessor)
-  ├── ITransport   (injected — default: TcpTransport)     [defined in Node.fs]
-  ├── IPersistence (injected — default: FilePersistence)  [defined in State.fs]
-  └── onApply: LogEntry -> unit  (state machine callback, injected by caller)
+RaftNode (public API facade in Node.fs)
+  └── MailboxProcessor<NodeMessage>  (agentLoop in NodeAgent.fs)
+        ├── handleRaftMessage     (NodeAgent.fs)   — RequestVote / AppendEntries / InstallSnapshot
+        ├── handleLocalMessage    (NodeAgent.fs)   — ClientCommand / AddPeer / RemovePeer / TakeSnapshot
+        ├── receiveElectionTimeout (NodeAgent.fs)  — startElection + broadcast
+        ├── receiveHeartbeatTimeout (NodeAgent.fs) — broadcastAppendEntries
+        ├── applyCommitted        (NodeAgent.fs)   — apply entries to state machine
+        ├── NodeBroadcaster       (NodeBroadcaster.fs) — outbound message fire-and-forget
+        └── NodeTimer             (NodeTimer.fs)   — election / heartbeat timer management
 ```
 
-Internally, the agent loop threads a `Node.Context` record through each step:
+Injected dependencies:
+- `ITransport`   (default: `TcpTransport`)  — [defined in `NodeTypes.fs`, impl in `Transport.fs`]
+- `IPersistence` (default: `FilePersistence`) — [defined in `State.fs`, impl in `Persistence.fs`]
+- `onApply: LogEntry -> unit`  — state machine callback
+- `onInstallSnapshot: string -> unit`  — snapshot callback (called async to avoid blocking the agent loop)
+
+Internally, the agent loop threads a `NodeContext` record (defined in `NodeTypes.fs`) through each step:
 
 ```fsharp
-type Context =
+type NodeContext =
     { Config: NodeConfig
       Transport: ITransport
       Persistence: IPersistence
       OnApply: LogEntry -> unit
+      OnInstallSnapshot: string -> unit
       Inbox: MailboxProcessor<NodeMessage>
       State: RaftState
       ElectionTimer: Timer option
-      HeartbeatTimer: Timer option }
+      HeartbeatTimer: Timer option
+      CancellationTokenSource: CancellationTokenSource }
 ```
 
 State is **immutable**. Every handler returns a new `RaftState`; the agent loop threads it through via tail-recursive `agentLoop`. Never mutate `RaftState` directly.
 
-`PersistentState` (`CurrentTerm`, `VotedFor`, `Log`) must be flushed to disk **before** replying to any RPC. The `saveIfChanged` helper in `Node.fs` enforces this — always call it after state transitions.
+`PersistentState` (`CurrentTerm`, `VotedFor`, `Log`) must be flushed to disk **before** replying to any RPC. The `saveIfChanged` helper in `NodeAgent.fs` enforces this — always call it after state transitions.
 
 ### Timer Handling
 
@@ -84,6 +102,7 @@ TCP connection timeout for outbound messages is **3 000 ms** (hardcoded in `Tran
 | `NodeTests.fs` | `RaftNode` actor behaviour using `MockTransport` / `MockPersistence` |
 | `TransportTests.fs` | `TcpTransport` — real loopback TCP send/receive |
 | `PersistenceTests.fs` | `FilePersistence` — save/load round-trip and overwrite |
+| `SerializationTests.fs` | `RaftMessageConverter` / `OptionConverter` — JSON round-trips |
 
 **`IntegrationTests.fs`** exercises end-to-end Raft scenarios (leader election, log replication, log inconsistency recovery, split-brain, stale leader rejection) by calling the pure `Election`, `Replication`, and `State` module functions directly — **no TCP sockets, no `RaftNode` actor, no real timers**. These tests are fast and deterministic.
 
