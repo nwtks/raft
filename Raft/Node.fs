@@ -4,7 +4,7 @@ type RaftNode(config: NodeConfig, transport: ITransport, persistence: IPersisten
     let cts = new System.Threading.CancellationTokenSource()
 
     let agent =
-        MailboxProcessor.Start(fun inbox ->
+        new MailboxProcessor<NodeMessage>(fun inbox ->
             let loadedState = persistence.Load()
 
             let ctx: NodeContext =
@@ -22,7 +22,15 @@ type RaftNode(config: NodeConfig, transport: ITransport, persistence: IPersisten
                 { ctx with
                     ElectionTimer = NodeTimer.resetElectionTimer ctx })
 
-    do transport.StartListener config (RaftRPC >> agent.Post) cts.Token |> ignore
+    do
+        try
+            transport.StartListener config (RaftRPC >> agent.Post) cts.Token |> ignore
+        with _ ->
+            (agent :> System.IDisposable).Dispose()
+            cts.Dispose()
+            reraise ()
+
+    do agent.Start()
 
     member _.SubmitCommand cmd =
         agent.PostAndReply(fun ch -> RaftRPC(ClientCommand(cmd, Some ch)))
