@@ -46,15 +46,15 @@ module Log =
 
 
     [<TailCall>]
-    let rec _merge acc =
+    let rec _merge logMap acc =
         function
         | [] -> acc
         | entry :: rest as remaining ->
-            match getEntry entry.Index acc with
-            | Some existing when existing.Term <> entry.Term ->
-                let truncated = truncateFrom entry.Index acc
-                truncated @ remaining
-            | Some _ -> _merge acc rest
+            match logMap |> Map.tryFind entry.Index with
+            | Some existing when existing.Term <> entry.Term -> truncateFrom entry.Index acc @ remaining
+            | Some _ -> _merge logMap acc rest
             | None -> acc @ remaining
 
-    let mergeEntries entries log = _merge log entries
+    let mergeEntries entries log =
+        let logMap = log |> List.map (fun e -> e.Index, e) |> Map.ofList
+        _merge logMap log entries
