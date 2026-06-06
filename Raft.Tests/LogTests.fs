@@ -9,13 +9,13 @@ let createEntry index term cmd =
       Command = cmd }
 
 [<Fact>]
-let ``empty log has lastIndex 0 and lastTerm 0`` () =
+let ``Log.empty returns lastIndex 0 and lastTerm 0`` () =
     let log = Log.empty
     Assert.Equal(0L, Log.lastIndex log)
     Assert.Equal(0L, Log.lastTerm log)
 
 [<Fact>]
-let ``append adds entry and increments index`` () =
+let ``Log.append adds entry and returns incremented lastIndex`` () =
     let log = Log.empty |> Log.append 1L "cmd1"
     Assert.Equal(1L, Log.lastIndex log)
     Assert.Equal(1L, Log.lastTerm log)
@@ -25,7 +25,7 @@ let ``append adds entry and increments index`` () =
     Assert.Equal("cmd1", entry.Value.Command)
 
 [<Fact>]
-let ``mergeEntries handles clean append`` () =
+let ``Log.mergeEntries appends new entries when no conflict exists`` () =
     let log = [ createEntry 1L 1L "cmd1" ]
     let newEntries = [ createEntry 2L 1L "cmd2" ]
 
@@ -34,7 +34,7 @@ let ``mergeEntries handles clean append`` () =
     Assert.Equal(2L, Log.lastIndex merged)
 
 [<Fact>]
-let ``mergeEntries truncates on conflict`` () =
+let ``Log.mergeEntries truncates conflicting entries and replaces with leader entries`` () =
     let log =
         [ createEntry 1L 1L "cmd1"; createEntry 2L 1L "cmd2"; createEntry 3L 1L "cmd3" ]
 

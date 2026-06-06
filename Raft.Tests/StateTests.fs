@@ -13,7 +13,7 @@ let dummyConfig =
       HeartbeatIntervalMs = 500 }
 
 [<Fact>]
-let ``State.init with None creates default PersistentState`` () =
+let ``State.init without persisted state creates default PersistentState with term 0`` () =
     let state = State.init dummyConfig None
 
     Assert.Equal(Follower, state.Role)
@@ -24,7 +24,7 @@ let ``State.init with None creates default PersistentState`` () =
     Assert.Equal(0L, state.Volatile.LastApplied)
 
 [<Fact>]
-let ``State.init with Some loadedState restores PersistentState correctly`` () =
+let ``State.init with persisted state restores CurrentTerm, VotedFor, and Log correctly`` () =
     let loaded: PersistentState =
         { CurrentTerm = 5L
           VotedFor = Some 2

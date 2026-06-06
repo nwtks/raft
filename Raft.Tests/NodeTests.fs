@@ -52,7 +52,7 @@ let configWithPeers id port =
       HeartbeatIntervalMs = 50 }
 
 [<Fact>]
-let ``Node initializes as Follower`` () =
+let ``RaftNode initializes as Follower with term 0`` () =
     task {
         let config = configForNode 1 16001
         let applied = ResizeArray<LogEntry>()
@@ -68,7 +68,7 @@ let ``Node initializes as Follower`` () =
     }
 
 [<Fact>]
-let ``SubmitCommand fails when not leader`` () =
+let ``RaftNode.SubmitCommand returns false when node is not Leader`` () =
     task {
         let config = configForNode 1 16002
         let transport = MockTransport()
@@ -80,7 +80,7 @@ let ``SubmitCommand fails when not leader`` () =
     }
 
 [<Fact>]
-let ``Node transitions to candidate (and leader if single node) after election timeout`` () =
+let ``RaftNode transitions to Candidate then Leader in single-node cluster after election timeout`` () =
     task {
         let config = configForNode 1 16003
         let transport = MockTransport()
@@ -99,7 +99,7 @@ let ``Node transitions to candidate (and leader if single node) after election t
     }
 
 [<Fact>]
-let ``Leader can submit commands and apply them`` () =
+let ``Leader RaftNode accepts submitted commands and applies them to state machine`` () =
     task {
         let config = configForNode 1 16004
         let applied = ResizeArray<LogEntry>()
@@ -119,7 +119,7 @@ let ``Leader can submit commands and apply them`` () =
     }
 
 [<Fact>]
-let ``Node can handle incoming Raft RPCs and broadcast messages to peers`` () =
+let ``RaftNode handles incoming RequestVote RPC and broadcasts election to peers`` () =
     task {
         let config = configWithPeers 1 16005
         let transport = MockTransport()
@@ -214,7 +214,7 @@ let ``Node can handle incoming Raft RPCs and broadcast messages to peers`` () =
     }
 
 [<Fact>]
-let ``Leader correctly broadcasts AppendEntries on heartbeat timeout and applies committed logs`` () =
+let ``Leader RaftNode broadcasts AppendEntries on heartbeat, processes responses, and applies committed entries`` () =
     task {
         let applied = ResizeArray<LogEntry>()
         let onApply entry = applied.Add entry

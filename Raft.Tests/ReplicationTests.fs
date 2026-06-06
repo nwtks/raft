@@ -24,7 +24,7 @@ let dummyEntry =
       Command = "put x 1" }
 
 [<Fact>]
-let ``handleAppendEntries rejects if leader term is lower`` () =
+let ``Replication.handleAppendEntries rejects request when leader term is lower than follower term`` () =
     let state =
         { State.init dummyConfig None with
             Persistent =
@@ -46,7 +46,7 @@ let ``handleAppendEntries rejects if leader term is lower`` () =
     Assert.Equal(0, newState.Persistent.Log.Length)
 
 [<Fact>]
-let ``handleAppendEntries appends valid entries and updates commitIndex`` () =
+let ``Replication.handleAppendEntries appends entries and updates commit index on success`` () =
     let state =
         { State.init dummyConfig None with
             Persistent =
@@ -69,7 +69,7 @@ let ``handleAppendEntries appends valid entries and updates commitIndex`` () =
     Assert.Equal(1L, newState.Volatile.CommitIndex)
 
 [<Fact>]
-let ``advanceCommitIndex correctly identifies majority match`` () =
+let ``Replication.advanceCommitIndex advances commit index when majority of peers have matched`` () =
     let leaderState =
         { NextIndex = Map.ofList [ 2, 2L; 3, 1L ]
           MatchIndex = Map.ofList [ 2, 1L; 3, 0L ] }
@@ -88,13 +88,13 @@ let ``advanceCommitIndex correctly identifies majority match`` () =
     Assert.Equal(1L, newState.Volatile.CommitIndex)
 
 [<Fact>]
-let ``createEntries returns None if not Leader`` () =
+let ``Replication.createAppendEntries returns None when node is not Leader`` () =
     let state = State.init dummyConfig None
     Assert.True(Replication.createAppendEntries 2 state |> Option.isNone)
     Assert.True(Replication.createHeartbeat 2 state |> Option.isNone)
 
 [<Fact>]
-let ``handleAppendEntries rejects if PrevLogIndex does not match term`` () =
+let ``Replication.handleAppendEntries rejects when PrevLogIndex term mismatches local log`` () =
     let state =
         { State.init dummyConfig None with
             Persistent =
@@ -115,7 +115,7 @@ let ``handleAppendEntries rejects if PrevLogIndex does not match term`` () =
     Assert.Equal(0L, resp.MatchIndex)
 
 [<Fact>]
-let ``handleAppendEntriesResponse updates term if FollowerTerm is higher`` () =
+let ``Replication.handleAppendEntriesResponse updates term when response contains higher term`` () =
     let state = State.init dummyConfig None
 
     let resp =
@@ -128,7 +128,7 @@ let ``handleAppendEntriesResponse updates term if FollowerTerm is higher`` () =
     Assert.Equal(2L, newState.Persistent.CurrentTerm)
 
 [<Fact>]
-let ``handleAppendEntriesResponse ignores response if not Leader`` () =
+let ``Replication.handleAppendEntriesResponse ignores response when node is not the Leader`` () =
     let state = State.init dummyConfig None
 
     let resp =
@@ -141,7 +141,7 @@ let ``handleAppendEntriesResponse ignores response if not Leader`` () =
     Assert.Equal(state, newState)
 
 [<Fact>]
-let ``handleAppendEntriesResponse decrements NextIndex on failure (log inconsistency)`` () =
+let ``Replication.handleAppendEntriesResponse decrements NextIndex on failure to resolve log inconsistency`` () =
     let leaderState =
         { NextIndex = Map.ofList [ 2, 2L; 3, 1L ]
           MatchIndex = Map.ofList [ 2, 1L; 3, 0L ] }
@@ -166,13 +166,13 @@ let ``handleAppendEntriesResponse decrements NextIndex on failure (log inconsist
     Assert.Equal(1L, updatedNext)
 
 [<Fact>]
-let ``advanceCommitIndex returns state unchanged if not Leader`` () =
+let ``Replication.advanceCommitIndex returns unchanged state when node is not Leader`` () =
     let state = State.init dummyConfig None
     let newState = Replication.advanceCommitIndex state
     Assert.Equal(state, newState)
 
 [<Fact>]
-let ``appendCommand ignores command if not Leader`` () =
+let ``Replication.appendCommand discards command when node is not Leader`` () =
     let state = State.init dummyConfig None
     let newState = Replication.appendCommand "should fail" state
     Assert.Empty newState.Persistent.Log

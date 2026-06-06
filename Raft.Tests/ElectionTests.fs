@@ -19,7 +19,7 @@ let dummyConfig =
       HeartbeatIntervalMs = 500 }
 
 [<Fact>]
-let ``startElection transitions to candidate, increments term, and votes for self`` () =
+let ``Election.startElection transitions node to Candidate, increments term, and votes for self`` () =
     let state = State.init dummyConfig None
     Assert.Equal(Follower, state.Role)
     Assert.Equal(0L, state.Persistent.CurrentTerm)
@@ -31,7 +31,7 @@ let ``startElection transitions to candidate, increments term, and votes for sel
     Assert.True(newState.VotesReceived |> Set.contains 1)
 
 [<Fact>]
-let ``handleRequestVote grants vote if candidate is up-to-date and term is higher`` () =
+let ``Election.handleRequestVote grants vote when candidate term is higher and log is up-to-date`` () =
     let state = State.init dummyConfig None
 
     let rv =
@@ -46,7 +46,7 @@ let ``handleRequestVote grants vote if candidate is up-to-date and term is highe
     Assert.Equal(Some 2, newState.Persistent.VotedFor)
 
 [<Fact>]
-let ``handleRequestVote rejects if candidate term is lower`` () =
+let ``Election.handleRequestVote rejects vote when candidate term is lower than current term`` () =
     let state =
         { State.init dummyConfig None with
             Persistent =
@@ -66,7 +66,7 @@ let ``handleRequestVote rejects if candidate term is lower`` () =
     Assert.Equal(None, newState.Persistent.VotedFor)
 
 [<Fact>]
-let ``handleVoteResponse becomes leader on majority`` () =
+let ``Election.handleVoteResponse promotes node to Leader upon receiving majority votes`` () =
     let state = Election.startElection (State.init dummyConfig None)
 
     let resp =
@@ -80,7 +80,7 @@ let ``handleVoteResponse becomes leader on majority`` () =
     Assert.Equal(Some 1, newState.CurrentLeader)
 
 [<Fact>]
-let ``handleRequestVote grants vote if already voted for this candidate`` () =
+let ``Election.handleRequestVote grants vote again when already voted for the same candidate`` () =
     let state =
         { State.init dummyConfig None with
             Persistent =
@@ -98,7 +98,7 @@ let ``handleRequestVote grants vote if already voted for this candidate`` () =
     Assert.True resp.VoteGranted
 
 [<Fact>]
-let ``handleVoteResponse updates term if response term is higher`` () =
+let ``Election.handleVoteResponse updates current term when response carries a higher term`` () =
     let state = Election.startElection (State.init dummyConfig None)
 
     let resp =
@@ -111,7 +111,7 @@ let ``handleVoteResponse updates term if response term is higher`` () =
     Assert.Equal(None, newState.Persistent.VotedFor)
 
 [<Fact>]
-let ``handleVoteResponse adds vote but remains candidate if no majority`` () =
+let ``Election.handleVoteResponse records vote but stays Candidate without majority`` () =
     let config5Nodes =
         { dummyConfig with
             Peers =

@@ -6,7 +6,7 @@ open Raft
 let getTestNodeId () = System.Random().Next(10000, 99999)
 
 [<Fact>]
-let ``Load returns None when file does not exist`` () =
+let ``FilePersistence.Load returns None when state file does not exist`` () =
     let nodeId = getTestNodeId ()
     let persistence = FilePersistence nodeId :> IPersistence
     let fileName = sprintf "state_%d.json" nodeId
@@ -18,7 +18,7 @@ let ``Load returns None when file does not exist`` () =
     Assert.True result.IsNone
 
 [<Fact>]
-let ``Save correctly serializes and Load correctly deserializes the state`` () =
+let ``FilePersistence.Save serializes and Load deserializes state correctly`` () =
     let nodeId = getTestNodeId ()
     let persistence = FilePersistence nodeId :> IPersistence
     let fileName = sprintf "state_%d.json" nodeId
@@ -50,7 +50,7 @@ let ``Save correctly serializes and Load correctly deserializes the state`` () =
             System.IO.File.Delete fileName
 
 [<Fact>]
-let ``Save overwrites previous state successfully`` () =
+let ``FilePersistence.Save overwrites previously saved state with new state`` () =
     let nodeId = getTestNodeId ()
     let persistence = FilePersistence nodeId :> IPersistence
     let fileName = sprintf "state_%d.json" nodeId

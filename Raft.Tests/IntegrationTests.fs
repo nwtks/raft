@@ -5,7 +5,7 @@ open Raft
 
 // Simulate simple cluster by directly passing messages (no TCP).
 [<Fact>]
-let ``Integration: 3 nodes elect leader and commit command`` () =
+let ``3-node cluster elects a leader and commits a client command`` () =
     let config1 =
         { NodeId = 1
           Host = ""
@@ -82,7 +82,7 @@ let ``Integration: 3 nodes elect leader and commit command`` () =
     Assert.Equal(1L, s2.Volatile.CommitIndex)
 
 [<Fact>]
-let ``Integration: leader down causes new election and leader change`` () =
+let ``Leader failure triggers new election and leadership change in 3-node cluster`` () =
     let config1 =
         { NodeId = 1
           Host = ""
@@ -166,7 +166,7 @@ let ``Integration: leader down causes new election and leader change`` () =
     Assert.True resp1_ae.Success
 
 [<Fact>]
-let ``Integration: two nodes become candidates and one wins`` () =
+let ``Concurrent candidacy resolves with one leader in 3-node cluster`` () =
     let config1 =
         { NodeId = 1
           Host = ""
@@ -233,7 +233,7 @@ let ``Integration: two nodes become candidates and one wins`` () =
     Assert.True resp2_ae.Success
 
 [<Fact>]
-let ``Integration: stale leader is rejected and steps down`` () =
+let ``Stale leader AppendEntries is rejected and stale leader steps down to Follower`` () =
     // Reuse basic config
     let config1 =
         { NodeId = 1
@@ -304,7 +304,7 @@ let ``Integration: stale leader is rejected and steps down`` () =
     Assert.True s1.LeaderState.IsNone
 
 [<Fact>]
-let ``Integration: leader recovers from log inconsistency by decrementing nextIndex`` () =
+let ``Leader resolves log inconsistency by decrementing NextIndex and retrying AppendEntries`` () =
     let config1 =
         { NodeId = 1
           Host = ""

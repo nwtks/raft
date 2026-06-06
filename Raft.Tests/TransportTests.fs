@@ -18,7 +18,7 @@ let dummyPeer port =
       Port = port }
 
 [<Fact>]
-let ``sendMessage triggers listener and receives message`` () =
+let ``TcpTransport.SendMessage triggers listener callback with correct message on loopback`` () =
     let port = 15001
     let config = dummyConfig port
     let cts = new System.Threading.CancellationTokenSource()
