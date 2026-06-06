@@ -1,6 +1,8 @@
 namespace Raft
 
 module Persistence =
+    let log msg = printfn "[Persistence] %s" msg
+
     let options = System.Text.Json.JsonSerializerOptions()
     do options.Converters.Add(OptionConverterFactory())
 
@@ -15,7 +17,8 @@ module Persistence =
             try
                 let json = System.IO.File.ReadAllText fileName
                 Some(System.Text.Json.JsonSerializer.Deserialize<PersistentState>(json, options))
-            with _ ->
+            with ex ->
+                log $"Failed to deserialize state file '{fileName}': {ex.Message}"
                 None
         else
             None
