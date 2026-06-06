@@ -21,6 +21,7 @@ module NodeAgent =
     let receiveElectionTimeout ctx =
         if ctx.State.Role <> Leader then
             let newState = Election.startElection ctx.State
+            saveIfChanged ctx newState
             NodeBroadcaster.broadcastRequestVote ctx.Config ctx.Transport newState
 
             let finalState =
@@ -130,8 +131,8 @@ module NodeAgent =
                 ch.Reply ctx.State
                 return! agentLoop ctx
             | Shutdown ch ->
-                NodeTimer.stopTimer ctx.ElectionTimer
-                NodeTimer.stopTimer ctx.HeartbeatTimer
+                NodeTimer.disposeTimer ctx.ElectionTimer
+                NodeTimer.disposeTimer ctx.HeartbeatTimer
                 ctx.CancellationTokenSource.Cancel()
                 ch.Reply()
         }

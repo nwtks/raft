@@ -21,6 +21,11 @@ module NodeTimer =
             |> ignore
         | None -> ()
 
+    let disposeTimer (timer: System.Threading.Timer option) =
+        match timer with
+        | Some t -> t.Dispose()
+        | None -> ()
+
     let resetElectionTimer ctx =
         resetTimer ctx.Inbox ctx.ElectionTimer ElectionTimeout (getRandomElectionTimeout ctx.Config)
 
