@@ -5,7 +5,10 @@ type NodeMessage =
     | ElectionTimeout
     | HeartbeatTimeout
     | GetState of AsyncReplyChannel<RaftState>
+    | ClientCommand of command: string * AsyncReplyChannel<bool>
     | TakeSnapshot of data: string * AsyncReplyChannel<unit>
+    | AddPeer of PeerInfo * AsyncReplyChannel<bool>
+    | RemovePeer of NodeId * AsyncReplyChannel<bool>
     | Shutdown of AsyncReplyChannel<unit>
 
 type ITransport =

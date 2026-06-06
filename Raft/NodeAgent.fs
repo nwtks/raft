@@ -56,8 +56,8 @@ module NodeAgent =
         else
             ctx.State, ctx.HeartbeatTimer
 
-    let handleRaftMessage ctx rpcMsg =
-        match rpcMsg with
+    let handleRaftMessage ctx =
+        function
         | RequestVoteMsg requestVote ->
             let state, response = Election.handleRequestVote requestVote ctx.State
             saveIfChanged ctx state
@@ -103,6 +103,19 @@ module NodeAgent =
             let state2 = Replication.advanceCommitIndex state
             saveIfChanged ctx state2
             state2, false
+
+    let handleLocalMessage ctx =
+        function
+        | ClientCommand(cmd, replyChannel) ->
+            if ctx.State.Role = Leader then
+                let state = Replication.appendCommand cmd ctx.State
+                saveIfChanged ctx state
+                NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state
+                replyChannel.Reply true
+                applyCommitted ctx.OnApply state
+            else
+                replyChannel.Reply false
+                ctx.State
         | AddPeer(peerInfo, replyChannel) ->
             if ctx.State.Role = Leader then
                 let newPeers =
@@ -128,32 +141,23 @@ module NodeAgent =
                     | None -> state
 
                 NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state2
-                replyChannel |> Option.iter (fun ch -> ch.Reply true)
-                state2, false
+                replyChannel.Reply true
+                applyCommitted ctx.OnApply state2
             else
-                replyChannel |> Option.iter (fun ch -> ch.Reply false)
-                ctx.State, false
+                replyChannel.Reply false
+                ctx.State
         | RemovePeer(peerId, replyChannel) ->
             if ctx.State.Role = Leader then
                 let newPeers = ctx.State.Config.Peers |> List.filter (fun p -> p.Id <> peerId)
                 let state = Replication.appendConfiguration newPeers ctx.State
                 saveIfChanged ctx state
                 NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state
-                replyChannel |> Option.iter (fun ch -> ch.Reply true)
-                state, false
+                replyChannel.Reply true
+                applyCommitted ctx.OnApply state
             else
-                replyChannel |> Option.iter (fun ch -> ch.Reply false)
-                ctx.State, false
-        | ClientCommand(cmd, replyChannel) ->
-            if ctx.State.Role = Leader then
-                let state = Replication.appendCommand cmd ctx.State
-                saveIfChanged ctx state
-                NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state
-                replyChannel |> Option.iter (fun ch -> ch.Reply true)
-                state, false
-            else
-                replyChannel |> Option.iter (fun ch -> ch.Reply false)
-                ctx.State, false
+                replyChannel.Reply false
+                ctx.State
+        | _ -> failwith "handleLocalMessage called with non-local message"
 
     let receiveRaftRPC ctx rpcMsg =
         let oldRole = ctx.State.Role
@@ -215,6 +219,20 @@ module NodeAgent =
             | GetState ch ->
                 ch.Reply ctx.State
                 return! agentLoop ctx
+            | ClientCommand _
+            | AddPeer _
+            | RemovePeer _ as localMsg ->
+                let state = handleLocalMessage ctx localMsg
+
+                let ctx2 =
+                    if state.Config <> ctx.Config then
+                        { ctx with
+                            State = state
+                            Config = state.Config }
+                    else
+                        { ctx with State = state }
+
+                return! agentLoop ctx2
             | TakeSnapshot(data, ch) ->
                 let lastApplied = ctx.State.Volatile.LastApplied
                 let lastTerm = Log.termAt lastApplied ctx.State.Persistent.Log

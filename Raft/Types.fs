@@ -95,6 +95,3 @@ type RaftMessage =
     | AppendEntriesResponseMsg of AppendEntriesResponse
     | InstallSnapshotMsg of InstallSnapshot
     | InstallSnapshotResponseMsg of InstallSnapshotResponse
-    | AddPeer of PeerInfo * AsyncReplyChannel<bool> option
-    | RemovePeer of NodeId * AsyncReplyChannel<bool> option
-    | ClientCommand of command: string * AsyncReplyChannel<bool> option

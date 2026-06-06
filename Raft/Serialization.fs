@@ -103,8 +103,5 @@ type RaftMessageConverter() =
             writer.WriteStartArray "Fields"
             System.Text.Json.JsonSerializer.Serialize(writer, snapResp, options)
             writer.WriteEndArray()
-        | AddPeer _ -> failwith "AddPeer cannot be serialized."
-        | RemovePeer _ -> failwith "RemovePeer cannot be serialized."
-        | ClientCommand _ -> failwith "ClientCommand cannot be serialized."
 
         writer.WriteEndObject()

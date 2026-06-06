@@ -42,16 +42,16 @@ type RaftNode
     do agent.Start()
 
     member _.SubmitCommand cmd =
-        agent.PostAndReply(fun ch -> RaftRPC(ClientCommand(cmd, Some ch)))
+        agent.PostAndReply(fun ch -> ClientCommand(cmd, ch))
 
     member _.SubmitTakeSnapshot data =
         agent.PostAndReply(fun ch -> TakeSnapshot(data, ch))
 
     member _.AddPeer peerInfo =
-        agent.PostAndReply(fun ch -> RaftRPC(AddPeer(peerInfo, Some ch)))
+        agent.PostAndReply(fun ch -> AddPeer(peerInfo, ch))
 
     member _.RemovePeer peerId =
-        agent.PostAndReply(fun ch -> RaftRPC(RemovePeer(peerId, Some ch)))
+        agent.PostAndReply(fun ch -> RemovePeer(peerId, ch))
 
     member _.GetState() = agent.PostAndReply GetState
 
