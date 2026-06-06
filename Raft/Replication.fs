@@ -123,29 +123,9 @@ module Replication =
               Success = false
               LastIncludedIndex = 0L }
         else
-            let state2 = State.followLeader snap.LeaderTerm snap.LeaderId state
-
-            let newLog =
-                Log.trim snap.LastIncludedIndex snap.LastIncludedTerm state2.Persistent.Log
-
-            let newCommitIndex = max state2.Volatile.CommitIndex snap.LastIncludedIndex
-            let newLastApplied = max state2.Volatile.LastApplied snap.LastIncludedIndex
-
-            let snapshot =
-                { LastIncludedIndex = snap.LastIncludedIndex
-                  LastIncludedTerm = snap.LastIncludedTerm
-                  StateMachineData = snap.Data }
-
             let newState =
-                { state2 with
-                    Persistent =
-                        { state2.Persistent with
-                            Log = newLog
-                            Snapshot = Some snapshot }
-                    Volatile =
-                        { state2.Volatile with
-                            CommitIndex = newCommitIndex
-                            LastApplied = newLastApplied } }
+                State.followLeader snap.LeaderTerm snap.LeaderId state
+                |> State.takeSnapshot snap.LastIncludedIndex snap.LastIncludedTerm snap.Data
 
             newState,
             { FollowerTerm = newState.Persistent.CurrentTerm
