@@ -9,6 +9,27 @@ module Transport =
 
     let log msg = printfn "[Transport] %s" msg
 
+    [<TailCall>]
+    let rec readAsync
+        (stream: System.Net.Sockets.NetworkStream)
+        (ct: System.Threading.CancellationToken)
+        buffer
+        offset
+        count
+        acc
+        =
+        async {
+            if count = 0 then
+                return acc
+            else
+                let! bytesRead = stream.ReadAsync(buffer, offset, count, ct) |> Async.AwaitTask
+
+                if bytesRead = 0 then
+                    return acc
+                else
+                    return! readAsync stream ct buffer (offset + bytesRead) (count - bytesRead) (acc + bytesRead)
+        }
+
     let startListener config postMessage (ct: System.Threading.CancellationToken) =
         task {
             let listener =
@@ -31,19 +52,45 @@ module Transport =
                     async {
                         use client = client
                         use stream = client.GetStream()
-                        let buffer = Array.zeroCreate 65536
-                        let! bytesRead = stream.ReadAsync(buffer, 0, buffer.Length, ct) |> Async.AwaitTask
 
-                        if bytesRead > 0 then
-                            let json = System.Text.Encoding.UTF8.GetString(buffer, 0, bytesRead)
+                        try
+                            while not ct.IsCancellationRequested do
+                                let lenBuf = Array.zeroCreate 4
+                                let! lenRead = readAsync stream ct lenBuf 0 4 0
 
-                            try
-                                let msg =
-                                    System.Text.Json.JsonSerializer.Deserialize<RaftMessage>(json, jsonOptions)
+                                if lenRead < 4 then
+                                    ct.ThrowIfCancellationRequested()
+                                    ()
+                                else
+                                    let msgLen =
+                                        int lenBuf.[0] <<< 24
+                                        ||| (int lenBuf.[1] <<< 16)
+                                        ||| (int lenBuf.[2] <<< 8)
+                                        ||| int lenBuf.[3]
 
-                                postMessage msg
-                            with ex ->
-                                log $"Error deserializing message: {ex.Message}."
+                                    let msgBuf = Array.zeroCreate msgLen
+                                    let! msgRead = readAsync stream ct msgBuf 0 msgLen 0
+
+                                    if msgRead < msgLen then
+                                        ct.ThrowIfCancellationRequested()
+                                        ()
+                                    else
+                                        let json = System.Text.Encoding.UTF8.GetString(msgBuf, 0, msgRead)
+
+                                        try
+                                            let msg =
+                                                System.Text.Json.JsonSerializer.Deserialize<RaftMessage>(
+                                                    json,
+                                                    jsonOptions
+                                                )
+
+                                            postMessage msg
+                                        with ex ->
+                                            log $"Error deserializing message: {ex.Message}."
+                        with
+                        | :? System.ObjectDisposedException
+                        | :? System.OperationCanceledException -> ()
+                        | ex -> log $"Connection handler error: {ex.Message}."
                     }
                     |> Async.Start
             with
@@ -64,7 +111,16 @@ module Transport =
                         System.Text.Json.JsonSerializer.Serialize(msg, jsonOptions)
                         |> System.Text.Encoding.UTF8.GetBytes
 
+                    let msgLen = bytes.Length
+
+                    let lenPrefix =
+                        [| byte (msgLen >>> 24)
+                           byte (msgLen >>> 16)
+                           byte (msgLen >>> 8)
+                           byte msgLen |]
+
                     use stream = client.GetStream()
+                    do! stream.WriteAsync(lenPrefix, 0, lenPrefix.Length)
                     do! stream.WriteAsync(bytes, 0, bytes.Length)
                 else
                     log $"Timeout connecting to {peer.Id} ({peer.Host}:{peer.Port})."

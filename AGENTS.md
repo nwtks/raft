@@ -6,7 +6,7 @@ This file provides guidance for AI agents working in this repository.
 
 - **Language**: F# on .NET 10.0
 - **Solution file**: `Raft.slnx`
-- **Serialization**: `System.Text.Json` + `FSharp.SystemTextJson` (`JsonFSharpConverter`)
+- **Serialization**: `System.Text.Json` with custom `RaftMessageConverter` and `OptionConverterFactory` (see `Serialization.fs`)
 - **Test framework**: xunit.v3 with Coverlet for coverage
 
 ## Project Layout
@@ -66,7 +66,7 @@ State is **immutable**. Every handler returns a new `RaftState`; the agent loop 
 
 ## Transport Wire Format
 
-Messages are serialized as JSON using `FSharp.SystemTextJson` with `JsonFSharpConverter`. The union case name is the discriminator (default FSharp.SystemTextJson behaviour). The buffer size is **65 536 bytes** per message; do not send messages larger than this without changing `Transport.fs`.
+Messages are serialized as JSON using custom `System.Text.Json` converters (`RaftMessageConverter` in `Serialization.fs`). The union case name is the discriminator (`"Case"` property) with the payload in a `"Fields"` array. Messages are framed with a **4-byte big-endian length prefix** followed by the UTF-8 JSON payload, so there is no hard size limit.
 
 TCP connection timeout for outbound messages is **3 000 ms** (hardcoded in `Transport.sendMessage`).
 

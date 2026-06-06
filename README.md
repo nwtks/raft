@@ -11,7 +11,7 @@ This project implements the core mechanics of Raft — Leader Election and Log R
 - **Leader Election:** Randomized election timeouts, `RequestVote` RPC handling, and dynamic leader promotion on majority vote.
 - **Log Replication:** `AppendEntries` RPC handling, log conflict resolution via `mergeEntries`, and commit index advancement.
 - **Actor Model Design:** Non-blocking, thread-safe state machine using F#'s `MailboxProcessor` (`Node.fs`). State is fully immutable; each message handler returns a new `RaftState` threaded through a tail-recursive `agentLoop`.
-- **TCP Transport Layer:** Custom JSON-based RPC serialization over raw TCP sockets using `FSharp.SystemTextJson` discriminated union support (`Transport.fs`).
+- **TCP Transport Layer:** Custom JSON-based RPC serialization over raw TCP sockets with length-prefixed framing and hand-written `System.Text.Json` converters (`Transport.fs`, `Serialization.fs`).
 - **Crash Recovery & Persistence:** Atomic disk persistence for `PersistentState` (`CurrentTerm`, `VotedFor`, `Log`) via a `.tmp`-swap write, ensuring state integrity across restarts (`Persistence.fs`).
 - **Interactive Cluster Demo:** A 3-node Key-Value Store (KVS) cluster demo with `put`, `get`, `state`, and `quit` commands (`Raft.App`).
 - **Comprehensive Test Suite:** Unit and integration tests covering election, log operations, replication, actor behaviour, transport, and persistence.
