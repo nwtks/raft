@@ -39,3 +39,11 @@ module NodeBroadcaster =
                 match Replication.createInstallSnapshot peer.Id state with
                 | Some snap -> sendAsync transport peer (InstallSnapshotMsg snap)
                 | None -> ()
+
+        for peer in state.NonVotingPeers do
+            match Replication.createAppendEntries peer.Id state with
+            | Some ae -> sendAsync transport peer (AppendEntriesMsg ae)
+            | None ->
+                match Replication.createInstallSnapshot peer.Id state with
+                | Some snap -> sendAsync transport peer (InstallSnapshotMsg snap)
+                | None -> ()

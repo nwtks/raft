@@ -296,7 +296,7 @@ let ``RaftNode.Dispose does not throw`` () =
     }
 
 [<Fact>]
-let ``Leader RaftNode.AddPeer appends configuration entry and broadcasts to all peers`` () =
+let ``Leader RaftNode.AddPeer adds as non-voting member and starts replication`` () =
     task {
         let config =
             { configWithPeers 1 16009 with
@@ -333,14 +333,67 @@ let ``Leader RaftNode.AddPeer appends configuration entry and broadcasts to all 
         let success = node.AddPeer newPeer
         Assert.True success
 
-        node.GetState() |> ignore
-
         let finalState = node.GetState()
-        Assert.Equal(2, finalState.Persistent.Log.Count)
-        Assert.StartsWith(ConfigChange.ConfigCommandPrefix, (Map.find 2L finalState.Persistent.Log).Command)
+        Assert.Equal(1, finalState.Persistent.Log.Count)
+        Assert.Contains(newPeer, finalState.NonVotingPeers)
+        Assert.Contains(transport.Messages, fun (p, _) -> p.Id = 4)
+    }
 
-        Assert.Contains(transport.Messages, fun (p, _) -> p.Id = 2)
-        Assert.Contains(transport.Messages, fun (p, _) -> p.Id = 3)
+[<Fact>]
+let ``Non-voting peer is promoted to voting member when caught up`` () =
+    task {
+        let config =
+            { configWithPeers 1 16021 with
+                ElectionTimeoutMinMs = 100
+                ElectionTimeoutMaxMs = 200 }
+
+        let transport = MockTransport()
+        let persistence = MockPersistence()
+        let node = new RaftNode(config, transport, persistence, ignore)
+
+        node.TriggerElectionTimeout()
+        let term = (node.GetState()).Persistent.CurrentTerm
+
+        transport.ReceiveMessage(
+            RequestVoteResponseMsg
+                { VoterId = 2
+                  VoterTerm = term
+                  VoteGranted = true }
+        )
+
+        let state = node.GetState()
+        Assert.Equal(Leader, state.Role)
+
+        let newPeer =
+            { Id = 4
+              Host = "127.0.0.1"
+              Port = 16022 }
+
+        let success = node.AddPeer newPeer
+        Assert.True success
+
+        let afterAdd = node.GetState()
+        Assert.Contains(newPeer, afterAdd.NonVotingPeers)
+        Assert.Equal(1, afterAdd.Persistent.Log.Count)
+
+        transport.Messages.Clear()
+
+        transport.ReceiveMessage(
+            AppendEntriesResponseMsg
+                { FollowerId = 4
+                  FollowerTerm = term
+                  Success = true
+                  MatchIndex = 1L
+                  ConflictTerm = 0L
+                  ConflictIndex = 0L }
+        )
+
+        node.TriggerHeartbeatTimeout()
+
+        let promotedState = node.GetState()
+        Assert.False(promotedState.NonVotingPeers |> List.exists (fun p -> p.Id = newPeer.Id))
+        Assert.Equal(2, promotedState.Persistent.Log.Count)
+        Assert.StartsWith(ConfigChange.ConfigCommandPrefix, (Map.find 2L promotedState.Persistent.Log).Command)
     }
 
 [<Fact>]

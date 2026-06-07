@@ -100,6 +100,53 @@ module NodeAgent =
         else
             state
 
+    let tryFinalizeConfiguration state =
+        match state.ConfigPhase, state.Role with
+        | JointPhase(_, newPeers), Leader ->
+            let lastEntry =
+                Log.getEntry (Log.lastIndex state.Persistent.Log) state.Persistent.Log
+
+            match lastEntry with
+            | Some entry when entry.Command.StartsWith ConfigChange.ConfigCommandPrefix ->
+                match ConfigChange.parse entry.Command with
+                | Some(FinalChange _) -> state
+                | _ -> Replication.appendFinalConfiguration newPeers state
+            | _ -> Replication.appendFinalConfiguration newPeers state
+        | _ -> state
+
+    let tryPromoteNonVotingPeers ctx state =
+        if state.Role = Leader && not (List.isEmpty state.NonVotingPeers) then
+            let lastIndex = Log.lastIndex state.Persistent.Log
+
+            let readyPeers =
+                state.NonVotingPeers
+                |> List.filter (fun p ->
+                    match state.LeaderState with
+                    | Some ls -> ls.MatchIndex |> Map.tryFind p.Id |> Option.defaultValue -1L >= lastIndex
+                    | None -> false)
+
+            match readyPeers with
+            | [] -> state
+            | readyPeers ->
+                let caughtUpIds = readyPeers |> List.map (fun p -> p.Id) |> Set.ofList
+
+                let remainingNonVoting =
+                    state.NonVotingPeers |> List.filter (fun p -> not (caughtUpIds.Contains p.Id))
+
+                let stateWithRemaining =
+                    { state with
+                        NonVotingPeers = remainingNonVoting }
+
+                let oldPeers = state.Config.Peers
+                let allVoting = List.append oldPeers readyPeers
+                let state2 = Replication.appendJointConsensus oldPeers allVoting stateWithRemaining
+                saveIfChanged ctx state2
+                NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state2
+                let appliedState = applyCommitted ctx.OnApply state2
+                tryFinalizeConfiguration (autoSnapshotIfNeeded ctx appliedState)
+        else
+            state
+
     let receiveElectionTimeout ctx =
         if ctx.State.Role <> Leader then
             let newState = Election.startElection ctx.State
@@ -122,7 +169,8 @@ module NodeAgent =
     let receiveHeartbeatTimeout ctx =
         if ctx.State.Role = Leader then
             NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport ctx.State
-            ctx.State, NodeTimer.resetHeartbeatTimer ctx
+            let state = tryPromoteNonVotingPeers ctx ctx.State
+            state, NodeTimer.resetHeartbeatTimer ctx
         else
             ctx.State, ctx.HeartbeatTimer
 
@@ -151,10 +199,13 @@ module NodeAgent =
 
             state, true
         | AppendEntriesResponseMsg response ->
-            let state = Replication.handleAppendEntriesResponse response ctx.State
-            let state2 = Replication.advanceCommitIndex state
-            saveIfChanged ctx state2
-            state2, false
+            let state =
+                Replication.handleAppendEntriesResponse response ctx.State
+                |> Replication.advanceCommitIndex
+                |> tryPromoteNonVotingPeers ctx
+
+            saveIfChanged ctx state
+            state, false
         | InstallSnapshotMsg snap ->
             let state, response = Replication.handleInstallSnapshot snap ctx.State
             saveIfChanged ctx state
@@ -181,20 +232,6 @@ module NodeAgent =
             let state2 = Replication.advanceCommitIndex state
             saveIfChanged ctx state2
             state2, false
-
-    let tryFinalizeConfiguration state =
-        match state.ConfigPhase, state.Role with
-        | JointPhase(_, newPeers), Leader ->
-            let lastEntry =
-                Log.getEntry (Log.lastIndex state.Persistent.Log) state.Persistent.Log
-
-            match lastEntry with
-            | Some entry when entry.Command.StartsWith ConfigChange.ConfigCommandPrefix ->
-                match ConfigChange.parse entry.Command with
-                | Some(FinalChange _) -> state
-                | _ -> Replication.appendFinalConfiguration newPeers state
-            | _ -> Replication.appendFinalConfiguration newPeers state
-        | _ -> state
 
     let handleLocalMessage ctx =
         function
@@ -229,34 +266,33 @@ module NodeAgent =
                 ctx.State
         | AddPeer(peerInfo, replyChannel) ->
             if ctx.State.Role = Leader then
-                let oldPeers = ctx.State.Config.Peers
+                if
+                    ctx.State.Config.Peers |> List.exists (fun p -> p.Id = peerInfo.Id)
+                    || ctx.State.NonVotingPeers |> List.exists (fun p -> p.Id = peerInfo.Id)
+                then
+                    replyChannel.Reply true
+                    ctx.State
+                else
+                    let state =
+                        { ctx.State with
+                            NonVotingPeers = peerInfo :: ctx.State.NonVotingPeers }
 
-                let newPeers =
-                    if oldPeers |> List.exists (fun p -> p.Id = peerInfo.Id) then
-                        oldPeers
-                    else
-                        peerInfo :: oldPeers
+                    let lastIdx = Log.lastIndex state.Persistent.Log
 
-                let state = Replication.appendJointConsensus oldPeers newPeers ctx.State
-                saveIfChanged ctx state
+                    let state2 =
+                        match state.LeaderState with
+                        | Some ls ->
+                            { state with
+                                LeaderState =
+                                    Some
+                                        { ls with
+                                            NextIndex = ls.NextIndex |> Map.add peerInfo.Id (lastIdx + 1L)
+                                            MatchIndex = ls.MatchIndex |> Map.add peerInfo.Id 0L } }
+                        | None -> state
 
-                let state2 =
-                    match state.LeaderState with
-                    | Some ls ->
-                        let lastIdx = Log.lastIndex state.Persistent.Log
-
-                        { state with
-                            LeaderState =
-                                Some
-                                    { ls with
-                                        NextIndex = ls.NextIndex |> Map.add peerInfo.Id (lastIdx + 1L)
-                                        MatchIndex = ls.MatchIndex |> Map.add peerInfo.Id 0L } }
-                    | None -> state
-
-                NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state2
-                let appliedState = applyCommitted ctx.OnApply state2
-                replyChannel.Reply true
-                tryFinalizeConfiguration (autoSnapshotIfNeeded ctx appliedState)
+                    NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state2
+                    replyChannel.Reply true
+                    state2
             else
                 replyChannel.Reply false
                 ctx.State

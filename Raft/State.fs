@@ -32,7 +32,8 @@ type RaftState =
       VotesReceived: Set<NodeId>
       CurrentLeader: NodeId option
       Config: NodeConfig
-      ConfigPhase: ConfigPhase }
+      ConfigPhase: ConfigPhase
+      NonVotingPeers: PeerInfo list }
 
 type IPersistence =
     abstract member Save: PersistentState -> unit
@@ -75,14 +76,19 @@ module State =
           VotesReceived = Set.empty
           CurrentLeader = None
           Config = updatedConfig
-          ConfigPhase = configPhase }
+          ConfigPhase = configPhase
+          NonVotingPeers = [] }
 
     let initLeaderState state =
         let newLog = Log.append state.Persistent.CurrentTerm "" state.Persistent.Log
 
+        let allPeers =
+            List.append state.Config.Peers state.NonVotingPeers
+            |> List.distinctBy (fun p -> p.Id)
+
         let leaderState =
-            { NextIndex = state.Config.Peers |> List.map (fun p -> p.Id, 1L) |> Map.ofList
-              MatchIndex = state.Config.Peers |> List.map (fun p -> p.Id, 0L) |> Map.ofList }
+            { NextIndex = allPeers |> List.map (fun p -> p.Id, 1L) |> Map.ofList
+              MatchIndex = allPeers |> List.map (fun p -> p.Id, 0L) |> Map.ofList }
 
         { state with
             Role = Leader
