@@ -6,9 +6,11 @@ type RaftNode
         transport: ITransport,
         persistence: IPersistence,
         onApply: LogEntry -> unit,
-        ?onInstallSnapshot: string -> unit
+        ?onInstallSnapshot: string -> unit,
+        ?onGetSnapshotData: unit -> string
     ) =
     let onInstallSnapshotFn = defaultArg onInstallSnapshot ignore
+    let onGetSnapshotDataFn = defaultArg onGetSnapshotData (fun () -> "")
     let cts = new System.Threading.CancellationTokenSource()
 
     let agent =
@@ -21,6 +23,7 @@ type RaftNode
                   Persistence = persistence
                   OnApply = onApply
                   OnInstallSnapshot = onInstallSnapshotFn
+                  OnGetSnapshotData = onGetSnapshotDataFn
                   Inbox = inbox
                   State = State.init config loadedState
                   ElectionTimer = None

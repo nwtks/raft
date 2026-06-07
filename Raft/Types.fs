@@ -85,4 +85,5 @@ type NodeConfig =
       Peers: PeerInfo list
       ElectionTimeoutMinMs: int
       ElectionTimeoutMaxMs: int
-      HeartbeatIntervalMs: int }
+      HeartbeatIntervalMs: int
+      SnapshotAutoThreshold: int }

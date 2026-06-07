@@ -23,7 +23,8 @@ let createConfig nodeId =
       Peers = otherPeers
       ElectionTimeoutMinMs = 1500
       ElectionTimeoutMaxMs = 3000
-      HeartbeatIntervalMs = 500 }
+      HeartbeatIntervalMs = 500
+      SnapshotAutoThreshold = 100 }
 
 let printHelp () =
     printfn "Raft KVS Demo"
@@ -104,11 +105,17 @@ let runNode nodeId =
         printfn "\n>>> Snapshot installed with %d entries" (lock kvsLock (fun () -> kvs.Count))
         printf "> "
 
+    let onGetSnapshotData () =
+        lock kvsLock (fun () -> System.Text.Json.JsonSerializer.Serialize kvs)
+
     let config = createConfig nodeId
     printfn "Starting Node %d on port %d..." nodeId config.Port
     let transport = TcpTransport()
     let persistence = FilePersistence nodeId
-    use node = new RaftNode(config, transport, persistence, onApply, onInstallSnapshot)
+
+    use node =
+        new RaftNode(config, transport, persistence, onApply, onInstallSnapshot, onGetSnapshotData)
+
     System.Threading.Thread.Sleep 2000
     printCommands ()
     inputLoop node kvs kvsLock

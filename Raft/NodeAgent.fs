@@ -40,6 +40,27 @@ module NodeAgent =
         if ctx.State.Persistent <> newState.Persistent then
             ctx.Persistence.Save newState.Persistent
 
+    let autoSnapshotIfNeeded ctx state =
+        if ctx.Config.SnapshotAutoThreshold > 0 then
+            let lastSnapIndex =
+                match state.Persistent.Snapshot with
+                | Some snap -> snap.LastIncludedIndex
+                | None -> 0L
+
+            let logEntryCount = Log.lastIndex state.Persistent.Log - lastSnapIndex
+
+            if logEntryCount >= int64 ctx.Config.SnapshotAutoThreshold then
+                let lastApplied = state.Volatile.LastApplied
+                let lastTerm = Log.termAt lastApplied state.Persistent.Log
+                let data = ctx.OnGetSnapshotData()
+                let newState = State.takeSnapshot lastApplied lastTerm data state
+                saveIfChanged ctx newState
+                newState
+            else
+                state
+        else
+            state
+
     let receiveElectionTimeout ctx =
         if ctx.State.Role <> Leader then
             let newState = Election.startElection ctx.State
@@ -143,8 +164,9 @@ module NodeAgent =
                 let state = Replication.appendCommand cmd ctx.State
                 saveIfChanged ctx state
                 NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state
+                let appliedState = applyCommitted ctx.OnApply state
                 replyChannel.Reply true
-                tryFinalizeConfiguration (applyCommitted ctx.OnApply state)
+                tryFinalizeConfiguration (autoSnapshotIfNeeded ctx appliedState)
             else
                 replyChannel.Reply false
                 ctx.State
@@ -175,8 +197,9 @@ module NodeAgent =
                     | None -> state
 
                 NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state2
+                let appliedState = applyCommitted ctx.OnApply state2
                 replyChannel.Reply true
-                tryFinalizeConfiguration (applyCommitted ctx.OnApply state2)
+                tryFinalizeConfiguration (autoSnapshotIfNeeded ctx appliedState)
             else
                 replyChannel.Reply false
                 ctx.State
@@ -187,8 +210,9 @@ module NodeAgent =
                 let state = Replication.appendJointConsensus oldPeers newPeers ctx.State
                 saveIfChanged ctx state
                 NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state
+                let appliedState = applyCommitted ctx.OnApply state
                 replyChannel.Reply true
-                tryFinalizeConfiguration (applyCommitted ctx.OnApply state)
+                tryFinalizeConfiguration (autoSnapshotIfNeeded ctx appliedState)
             else
                 replyChannel.Reply false
                 ctx.State
@@ -214,7 +238,8 @@ module NodeAgent =
                 ctx.ElectionTimer, ctx.HeartbeatTimer
 
         let appliedState = applyCommitted ctx.OnApply newState
-        tryFinalizeConfiguration appliedState, electionTimer, heartbeatTimer
+        let snapshottedState = autoSnapshotIfNeeded ctx appliedState
+        tryFinalizeConfiguration snapshottedState, electionTimer, heartbeatTimer
 
     [<TailCall>]
     let rec agentLoop ctx =

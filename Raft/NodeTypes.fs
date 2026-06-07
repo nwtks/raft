@@ -26,6 +26,7 @@ type NodeContext =
       Persistence: IPersistence
       OnApply: LogEntry -> unit
       OnInstallSnapshot: string -> unit
+      OnGetSnapshotData: unit -> string
       Inbox: MailboxProcessor<NodeMessage>
       State: RaftState
       ElectionTimer: System.Threading.Timer option

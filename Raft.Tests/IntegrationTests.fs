@@ -14,7 +14,8 @@ let ``3-node cluster elects a leader and commits a client command`` () =
           Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
           ElectionTimeoutMinMs = 1
           ElectionTimeoutMaxMs = 2
-          HeartbeatIntervalMs = 1 }
+          HeartbeatIntervalMs = 1
+          SnapshotAutoThreshold = 0 }
 
     let config2 =
         { config1 with
@@ -91,7 +92,8 @@ let ``Leader failure triggers new election and leadership change in 3-node clust
           Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
           ElectionTimeoutMinMs = 1
           ElectionTimeoutMaxMs = 2
-          HeartbeatIntervalMs = 1 }
+          HeartbeatIntervalMs = 1
+          SnapshotAutoThreshold = 0 }
 
     let config2 =
         { config1 with
@@ -175,7 +177,8 @@ let ``Concurrent candidacy resolves with one leader in 3-node cluster`` () =
           Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
           ElectionTimeoutMinMs = 1
           ElectionTimeoutMaxMs = 2
-          HeartbeatIntervalMs = 1 }
+          HeartbeatIntervalMs = 1
+          SnapshotAutoThreshold = 0 }
 
     let config2 =
         { config1 with
@@ -243,7 +246,8 @@ let ``Stale leader AppendEntries is rejected and stale leader steps down to Foll
           Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
           ElectionTimeoutMinMs = 1
           ElectionTimeoutMaxMs = 2
-          HeartbeatIntervalMs = 1 }
+          HeartbeatIntervalMs = 1
+          SnapshotAutoThreshold = 0 }
 
     let config2 =
         { config1 with
@@ -313,7 +317,8 @@ let ``Leader resolves log inconsistency by decrementing NextIndex and retrying A
           Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
           ElectionTimeoutMinMs = 1
           ElectionTimeoutMaxMs = 2
-          HeartbeatIntervalMs = 1 }
+          HeartbeatIntervalMs = 1
+          SnapshotAutoThreshold = 0 }
 
     let config2 =
         { config1 with
@@ -423,7 +428,8 @@ let ``Leader replicates commands to followers who both commit and apply`` () =
           Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
           ElectionTimeoutMinMs = 1
           ElectionTimeoutMaxMs = 2
-          HeartbeatIntervalMs = 1 }
+          HeartbeatIntervalMs = 1
+          SnapshotAutoThreshold = 0 }
 
     let config2 =
         { config1 with
@@ -514,7 +520,8 @@ let ``takeSnapshot on leader trims log and snapshot is installable on follower``
           Peers = [ { Id = 2; Host = ""; Port = 0 } ]
           ElectionTimeoutMinMs = 1
           ElectionTimeoutMaxMs = 2
-          HeartbeatIntervalMs = 1 }
+          HeartbeatIntervalMs = 1
+          SnapshotAutoThreshold = 0 }
 
     let config2 =
         { NodeId = 2
@@ -523,7 +530,8 @@ let ``takeSnapshot on leader trims log and snapshot is installable on follower``
           Peers = [ { Id = 1; Host = ""; Port = 0 } ]
           ElectionTimeoutMinMs = 1
           ElectionTimeoutMaxMs = 2
-          HeartbeatIntervalMs = 1 }
+          HeartbeatIntervalMs = 1
+          SnapshotAutoThreshold = 0 }
 
     let mutable s1 = State.init config1 None
     let mutable s2 = State.init config2 None
