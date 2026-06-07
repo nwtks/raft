@@ -13,7 +13,9 @@ type LogIndex = int64
 type LogEntry =
     { Index: LogIndex
       Term: Term
-      Command: string }
+      Command: string
+      ClientId: string option
+      SeqNum: int64 option }
 
 type NodeRole =
     | Follower

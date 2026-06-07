@@ -24,7 +24,8 @@ let ``Election.startElection increments term from non-zero term`` () =
                 { CurrentTerm = 5L
                   VotedFor = None
                   Log = Map.empty
-                  Snapshot = None } }
+                  Snapshot = None
+                  SessionTable = Map.empty } }
 
     let newState = Election.startElection state
     Assert.Equal(Candidate, newState.Role)
@@ -54,7 +55,8 @@ let ``Election.handleRequestVote rejects vote when candidate term is lower than 
                 { CurrentTerm = 2L
                   VotedFor = None
                   Log = Map.empty
-                  Snapshot = None } }
+                  Snapshot = None
+                  SessionTable = Map.empty } }
 
     let rv =
         { CandidateTerm = 1L
@@ -75,7 +77,8 @@ let ``Election.handleRequestVote grants vote again when already voted for the sa
                 { CurrentTerm = 1L
                   VotedFor = Some 2
                   Log = Map.empty
-                  Snapshot = None } }
+                  Snapshot = None
+                  SessionTable = Map.empty } }
 
     let rv =
         { CandidateTerm = 1L
@@ -93,8 +96,15 @@ let ``Election.handleRequestVote rejects when candidate log is behind`` () =
             Persistent =
                 { CurrentTerm = 1L
                   VotedFor = None
-                  Log = logFromList [ { Index = 1L; Term = 1L; Command = "x" } ]
-                  Snapshot = None } }
+                  Log =
+                    logFromList
+                        [ { Index = 1L
+                            Term = 1L
+                            Command = "x"
+                            ClientId = None
+                            SeqNum = None } ]
+                  Snapshot = None
+                  SessionTable = Map.empty } }
 
     let rv =
         { CandidateTerm = 2L
@@ -113,7 +123,8 @@ let ``Election.handleRequestVote rejects when already voted for different candid
                 { CurrentTerm = 1L
                   VotedFor = Some 3
                   Log = Map.empty
-                  Snapshot = None } }
+                  Snapshot = None
+                  SessionTable = Map.empty } }
 
     let rv =
         { CandidateTerm = 1L
@@ -133,7 +144,8 @@ let ``Election.handleRequestVote grants vote when candidate term equals current 
                 { CurrentTerm = 3L
                   VotedFor = None
                   Log = Map.empty
-                  Snapshot = None } }
+                  Snapshot = None
+                  SessionTable = Map.empty } }
 
     let rv =
         { CandidateTerm = 3L

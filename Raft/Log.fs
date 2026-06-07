@@ -29,7 +29,21 @@ module Log =
         let entry =
             { Index = nextIndex
               Term = term
-              Command = command }
+              Command = command
+              ClientId = None
+              SeqNum = None }
+
+        log |> Map.add entry.Index entry
+
+    let appendWithSession term command clientId seqNum log =
+        let nextIndex = lastIndex log + 1L
+
+        let entry =
+            { Index = nextIndex
+              Term = term
+              Command = command
+              ClientId = Some clientId
+              SeqNum = Some seqNum }
 
         log |> Map.add entry.Index entry
 
@@ -56,7 +70,9 @@ module Log =
         let sentinel =
             { Index = lastIncludedIndex
               Term = lastIncludedTerm
-              Command = "" }
+              Command = ""
+              ClientId = None
+              SeqNum = None }
 
         log
         |> Map.filter (fun k _ -> k > lastIncludedIndex)

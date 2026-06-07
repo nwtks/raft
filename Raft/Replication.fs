@@ -228,3 +228,12 @@ module Replication =
         else
             let newLog = Log.append state.Persistent.CurrentTerm command state.Persistent.Log
             State.updateLog newLog state
+
+    let appendCommandWithSession command clientId seqNum state =
+        if state.Role <> Leader then
+            state
+        else
+            let newLog =
+                Log.appendWithSession state.Persistent.CurrentTerm command clientId seqNum state.Persistent.Log
+
+            State.updateLog newLog state

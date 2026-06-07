@@ -31,11 +31,16 @@ let ``FilePersistence.Save serializes and Load deserializes state correctly`` ()
             logFromList
                 [ { Index = 1L
                     Term = 40L
-                    Command = "put x 1" }
+                    Command = "put x 1"
+                    ClientId = None
+                    SeqNum = None }
                   { Index = 2L
                     Term = 42L
-                    Command = "put y 2" } ]
-          Snapshot = None }
+                    Command = "put y 2"
+                    ClientId = None
+                    SeqNum = None } ]
+          Snapshot = None
+          SessionTable = Map.empty }
 
     try
         persistence.Save originalState
@@ -62,7 +67,8 @@ let ``FilePersistence.Save overwrites previously saved state with new state`` ()
         { CurrentTerm = 1L
           VotedFor = None
           Log = Map.empty
-          Snapshot = None }
+          Snapshot = None
+          SessionTable = Map.empty }
 
     let state2: PersistentState =
         { CurrentTerm = 2L
@@ -71,8 +77,11 @@ let ``FilePersistence.Save overwrites previously saved state with new state`` ()
             logFromList
                 [ { Index = 1L
                     Term = 2L
-                    Command = "set a b" } ]
-          Snapshot = None }
+                    Command = "set a b"
+                    ClientId = None
+                    SeqNum = None } ]
+          Snapshot = None
+          SessionTable = Map.empty }
 
     try
         persistence.Save state1

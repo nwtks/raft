@@ -7,7 +7,9 @@ open TestHelpers
 let dummyEntry =
     { Index = 1L
       Term = 1L
-      Command = "put x 1" }
+      Command = "put x 1"
+      ClientId = None
+      SeqNum = None }
 
 [<Fact>]
 let ``Replication.createAppendEntries returns None when node is not Leader`` () =
@@ -23,7 +25,8 @@ let ``Replication.handleAppendEntries rejects request when leader term is lower 
                 { CurrentTerm = 2L
                   VotedFor = None
                   Log = Map.empty
-                  Snapshot = None } }
+                  Snapshot = None
+                  SessionTable = Map.empty } }
 
     let ae =
         { LeaderTerm = 1L
@@ -46,7 +49,8 @@ let ``Replication.handleAppendEntries appends entries and updates commit index o
                 { CurrentTerm = 1L
                   VotedFor = None
                   Log = Map.empty
-                  Snapshot = None } }
+                  Snapshot = None
+                  SessionTable = Map.empty } }
 
     let ae =
         { LeaderTerm = 1L
@@ -70,7 +74,8 @@ let ``Replication.handleAppendEntries rejects when PrevLogIndex term mismatches 
                 { CurrentTerm = 2L
                   VotedFor = None
                   Log = logFromList [ dummyEntry ]
-                  Snapshot = None } }
+                  Snapshot = None
+                  SessionTable = Map.empty } }
 
     let ae =
         { LeaderTerm = 2L
@@ -91,8 +96,15 @@ let ``Replication.handleAppendEntries rejects when PrevLogIndex exceeds follower
             Persistent =
                 { CurrentTerm = 2L
                   VotedFor = None
-                  Log = logFromList [ { Index = 1L; Term = 1L; Command = "x" } ]
-                  Snapshot = None } }
+                  Log =
+                    logFromList
+                        [ { Index = 1L
+                            Term = 1L
+                            Command = "x"
+                            ClientId = None
+                            SeqNum = None } ]
+                  Snapshot = None
+                  SessionTable = Map.empty } }
 
     let ae =
         { LeaderTerm = 2L
@@ -109,7 +121,13 @@ let ``Replication.handleAppendEntries rejects when PrevLogIndex exceeds follower
 
 [<Fact>]
 let ``Replication.handleAppendEntries with PrevLogIndex > log last index returns ConflictIndex = lastIndex + 1`` () =
-    let log = logFromList [ { Index = 1L; Term = 1L; Command = "a" } ]
+    let log =
+        logFromList
+            [ { Index = 1L
+                Term = 1L
+                Command = "a"
+                ClientId = None
+                SeqNum = None } ]
 
     let state =
         { State.init dummyConfig None with
@@ -117,7 +135,8 @@ let ``Replication.handleAppendEntries with PrevLogIndex > log last index returns
                 { CurrentTerm = 1L
                   VotedFor = None
                   Log = log
-                  Snapshot = None }
+                  Snapshot = None
+                  SessionTable = Map.empty }
             CurrentLeader = Some 2 }
 
     let ae =
@@ -135,7 +154,13 @@ let ``Replication.handleAppendEntries with PrevLogIndex > log last index returns
 
 [<Fact>]
 let ``Replication.handleAppendEntries with conflict at log index 1 triggers firstIdx base case`` () =
-    let log = logFromList [ { Index = 1L; Term = 1L; Command = "a" } ]
+    let log =
+        logFromList
+            [ { Index = 1L
+                Term = 1L
+                Command = "a"
+                ClientId = None
+                SeqNum = None } ]
 
     let state =
         { State.init dummyConfig None with
@@ -143,7 +168,8 @@ let ``Replication.handleAppendEntries with conflict at log index 1 triggers firs
                 { CurrentTerm = 2L
                   VotedFor = None
                   Log = log
-                  Snapshot = None }
+                  Snapshot = None
+                  SessionTable = Map.empty }
             CurrentLeader = Some 3 }
 
     let ae =
@@ -202,7 +228,8 @@ let ``Replication.handleAppendEntriesResponse decrements NextIndex on failure to
                 { CurrentTerm = 1L
                   VotedFor = None
                   Log = logFromList [ dummyEntry ]
-                  Snapshot = None }
+                  Snapshot = None
+                  SessionTable = Map.empty }
             LeaderState = Some leaderState }
 
     let resp =
@@ -231,10 +258,23 @@ let ``Replication.handleAppendEntriesResponse uses ConflictTerm optimization whe
                   VotedFor = None
                   Log =
                     logFromList
-                        [ { Index = 1L; Term = 1L; Command = "x" }
-                          { Index = 2L; Term = 1L; Command = "y" }
-                          { Index = 3L; Term = 1L; Command = "z" } ]
-                  Snapshot = None }
+                        [ { Index = 1L
+                            Term = 1L
+                            Command = "x"
+                            ClientId = None
+                            SeqNum = None }
+                          { Index = 2L
+                            Term = 1L
+                            Command = "y"
+                            ClientId = None
+                            SeqNum = None }
+                          { Index = 3L
+                            Term = 1L
+                            Command = "z"
+                            ClientId = None
+                            SeqNum = None } ]
+                  Snapshot = None
+                  SessionTable = Map.empty }
             LeaderState = Some leaderState }
 
     let resp =
@@ -260,8 +300,15 @@ let ``Replication.handleAppendEntriesResponse uses ConflictIndex when leader has
             Persistent =
                 { CurrentTerm = 2L
                   VotedFor = None
-                  Log = logFromList [ { Index = 1L; Term = 1L; Command = "x" } ]
-                  Snapshot = None }
+                  Log =
+                    logFromList
+                        [ { Index = 1L
+                            Term = 1L
+                            Command = "x"
+                            ClientId = None
+                            SeqNum = None } ]
+                  Snapshot = None
+                  SessionTable = Map.empty }
             LeaderState = Some leaderState }
 
     let resp =
@@ -288,7 +335,8 @@ let ``Replication.handleAppendEntriesResponse with success updates match and nex
                 { CurrentTerm = 1L
                   VotedFor = None
                   Log = Map.empty
-                  Snapshot = None }
+                  Snapshot = None
+                  SessionTable = Map.empty }
             LeaderState = Some ls }
 
     let resp =
@@ -305,7 +353,13 @@ let ``Replication.handleAppendEntriesResponse with success updates match and nex
 
 [<Fact>]
 let ``Replication.handleAppendEntriesResponse with ConflictTerm decrements NextIndex appropriately`` () =
-    let log = logFromList [ { Index = 3L; Term = 1L; Command = "x" } ]
+    let log =
+        logFromList
+            [ { Index = 3L
+                Term = 1L
+                Command = "x"
+                ClientId = None
+                SeqNum = None } ]
 
     let ls: LeaderState =
         { NextIndex = Map.ofList [ 2, 5L ]
@@ -318,7 +372,8 @@ let ``Replication.handleAppendEntriesResponse with ConflictTerm decrements NextI
                 { CurrentTerm = 1L
                   VotedFor = None
                   Log = log
-                  Snapshot = None }
+                  Snapshot = None
+                  SessionTable = Map.empty }
             LeaderState = Some ls }
 
     let resp =
@@ -334,7 +389,13 @@ let ``Replication.handleAppendEntriesResponse with ConflictTerm decrements NextI
 
 [<Fact>]
 let ``Replication.handleAppendEntriesResponse with ConflictTerm not found in log uses ConflictIndex`` () =
-    let log = logFromList [ { Index = 1L; Term = 1L; Command = "a" } ]
+    let log =
+        logFromList
+            [ { Index = 1L
+                Term = 1L
+                Command = "a"
+                ClientId = None
+                SeqNum = None } ]
 
     let ls: LeaderState =
         { NextIndex = Map.ofList [ 2, 5L ]
@@ -347,7 +408,8 @@ let ``Replication.handleAppendEntriesResponse with ConflictTerm not found in log
                 { CurrentTerm = 2L
                   VotedFor = None
                   Log = log
-                  Snapshot = None }
+                  Snapshot = None
+                  SessionTable = Map.empty }
             LeaderState = Some ls }
 
     let resp =
@@ -374,7 +436,8 @@ let ``Replication.handleAppendEntriesResponse with ConflictTerm=0 uses ConflictI
                 { CurrentTerm = 1L
                   VotedFor = None
                   Log = Map.empty
-                  Snapshot = None }
+                  Snapshot = None
+                  SessionTable = Map.empty }
             LeaderState = Some ls }
 
     let resp =
@@ -400,7 +463,13 @@ let ``Replication.createInstallSnapshot returns None when no snapshot exists`` (
 
 [<Fact>]
 let ``Replication.createInstallSnapshot returns Some when snapshot exists and follower needs it`` () =
-    let log = logFromList [ { Index = 4L; Term = 1L; Command = "c" } ]
+    let log =
+        logFromList
+            [ { Index = 4L
+                Term = 1L
+                Command = "c"
+                ClientId = None
+                SeqNum = None } ]
 
     let ls: LeaderState =
         { NextIndex = Map.ofList [ 2, 1L ]
@@ -417,7 +486,8 @@ let ``Replication.createInstallSnapshot returns Some when snapshot exists and fo
                     Some
                         { LastIncludedIndex = 3L
                           LastIncludedTerm = 1L
-                          StateMachineData = "snap" } }
+                          StateMachineData = "snap" }
+                  SessionTable = Map.empty }
             LeaderState = Some ls }
 
     let snap = Replication.createInstallSnapshot 2 state
@@ -428,7 +498,13 @@ let ``Replication.createInstallSnapshot returns Some when snapshot exists and fo
 
 [<Fact>]
 let ``Replication.createInstallSnapshot returns None when snapshot is behind follower's next index`` () =
-    let log = logFromList [ { Index = 5L; Term = 1L; Command = "c" } ]
+    let log =
+        logFromList
+            [ { Index = 5L
+                Term = 1L
+                Command = "c"
+                ClientId = None
+                SeqNum = None } ]
 
     let ls: LeaderState =
         { NextIndex = Map.ofList [ 2, 10L ]
@@ -445,7 +521,8 @@ let ``Replication.createInstallSnapshot returns None when snapshot is behind fol
                     Some
                         { LastIncludedIndex = 5L
                           LastIncludedTerm = 1L
-                          StateMachineData = "snap" } }
+                          StateMachineData = "snap" }
+                  SessionTable = Map.empty }
             LeaderState = Some ls }
 
     let snap = Replication.createInstallSnapshot 2 state
@@ -465,7 +542,8 @@ let ``Replication.handleInstallSnapshot rejects when leader term is lower`` () =
                 { CurrentTerm = 3L
                   VotedFor = None
                   Log = Map.empty
-                  Snapshot = None } }
+                  Snapshot = None
+                  SessionTable = Map.empty } }
 
     let snap =
         { LeaderTerm = 2L
@@ -488,10 +566,23 @@ let ``Replication.handleInstallSnapshot installs snapshot and trims log`` () =
                   VotedFor = None
                   Log =
                     logFromList
-                        [ { Index = 1L; Term = 1L; Command = "a" }
-                          { Index = 2L; Term = 1L; Command = "b" }
-                          { Index = 3L; Term = 1L; Command = "c" } ]
-                  Snapshot = None } }
+                        [ { Index = 1L
+                            Term = 1L
+                            Command = "a"
+                            ClientId = None
+                            SeqNum = None }
+                          { Index = 2L
+                            Term = 1L
+                            Command = "b"
+                            ClientId = None
+                            SeqNum = None }
+                          { Index = 3L
+                            Term = 1L
+                            Command = "c"
+                            ClientId = None
+                            SeqNum = None } ]
+                  Snapshot = None
+                  SessionTable = Map.empty } }
 
     let snap =
         { LeaderTerm = 2L
@@ -533,7 +624,8 @@ let ``Replication.handleInstallSnapshotResponse updates match and next index on 
                 { CurrentTerm = 2L
                   VotedFor = None
                   Log = Map.empty
-                  Snapshot = None }
+                  Snapshot = None
+                  SessionTable = Map.empty }
             LeaderState = Some ls }
 
     let resp =
@@ -573,7 +665,8 @@ let ``Replication.advanceCommitIndex advances commit index when majority of peer
                 { CurrentTerm = 1L
                   VotedFor = None
                   Log = logFromList [ dummyEntry ]
-                  Snapshot = None }
+                  Snapshot = None
+                  SessionTable = Map.empty }
             LeaderState = Some leaderState
             Volatile = { CommitIndex = 0L; LastApplied = 0L } }
 
@@ -600,9 +693,18 @@ let ``Replication.advanceCommitIndex does not advance when term does not match c
                   VotedFor = None
                   Log =
                     logFromList
-                        [ { Index = 1L; Term = 1L; Command = "a" }
-                          { Index = 2L; Term = 1L; Command = "b" } ]
-                  Snapshot = None }
+                        [ { Index = 1L
+                            Term = 1L
+                            Command = "a"
+                            ClientId = None
+                            SeqNum = None }
+                          { Index = 2L
+                            Term = 1L
+                            Command = "b"
+                            ClientId = None
+                            SeqNum = None } ]
+                  Snapshot = None
+                  SessionTable = Map.empty }
             LeaderState = Some leaderState
             Volatile = { CommitIndex = 0L; LastApplied = 0L } }
 

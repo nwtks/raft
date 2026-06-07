@@ -60,10 +60,14 @@ let ``AppendEntriesMsg round-trips through JSON`` () =
               Entries =
                 [ { Index = 1L
                     Term = 1L
-                    Command = "set x 1" }
+                    Command = "set x 1"
+                    ClientId = None
+                    SeqNum = None }
                   { Index = 2L
                     Term = 1L
-                    Command = "set y 2" } ]
+                    Command = "set y 2"
+                    ClientId = None
+                    SeqNum = None } ]
               LeaderCommit = 1L }
 
     let deserialized = roundTrip original

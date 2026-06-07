@@ -329,7 +329,12 @@ let ``Leader resolves log inconsistency by decrementing NextIndex and retrying A
     let mutable s2 = State.init config2 None
 
     // 1. Initial state: both have index 1, term 1
-    let entry1 = { Index = 1L; Term = 1L; Command = "A" }
+    let entry1 =
+        { Index = 1L
+          Term = 1L
+          Command = "A"
+          ClientId = None
+          SeqNum = None }
 
     s1 <-
         { s1 with
@@ -348,8 +353,19 @@ let ``Leader resolves log inconsistency by decrementing NextIndex and retrying A
     // 2. LOG INCONSISTENCY:
     // Node 1 (Leader) has [1,1,A]; [2,1,B]
     // Node 2 (Follower) has [1,1,A]; [2,2,C] (different term at index 2)
-    let entry1B = { Index = 2L; Term = 1L; Command = "B" }
-    let entry2C = { Index = 2L; Term = 2L; Command = "C" }
+    let entry1B =
+        { Index = 2L
+          Term = 1L
+          Command = "B"
+          ClientId = None
+          SeqNum = None }
+
+    let entry2C =
+        { Index = 2L
+          Term = 2L
+          Command = "C"
+          ClientId = None
+          SeqNum = None }
 
     s1 <-
         { s1 with
@@ -602,7 +618,13 @@ let ``broadcastAppendEntries falls back to InstallSnapshot when follower is behi
     // where createAppendEntries returns None (follower behind snapshot)
     // and createInstallSnapshot returns Some
 
-    let log = logFromList [ { Index = 5L; Term = 2L; Command = "d" } ]
+    let log =
+        logFromList
+            [ { Index = 5L
+                Term = 2L
+                Command = "d"
+                ClientId = None
+                SeqNum = None } ]
 
     let ls: LeaderState =
         { NextIndex = Map.ofList [ 2, 1L ]
@@ -619,7 +641,8 @@ let ``broadcastAppendEntries falls back to InstallSnapshot when follower is behi
                     Some
                         { LastIncludedIndex = 3L
                           LastIncludedTerm = 1L
-                          StateMachineData = "snap" } }
+                          StateMachineData = "snap" }
+                  SessionTable = Map.empty }
             LeaderState = Some ls
             Volatile = { CommitIndex = 3L; LastApplied = 3L } }
 

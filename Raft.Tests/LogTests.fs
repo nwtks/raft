@@ -7,7 +7,9 @@ open TestHelpers
 let createEntry index term cmd =
     { Index = index
       Term = term
-      Command = cmd }
+      Command = cmd
+      ClientId = None
+      SeqNum = None }
 
 [<Fact>]
 let ``Log.empty returns lastIndex 0 and lastTerm 0`` () =

@@ -9,7 +9,8 @@ type PersistentState =
     { CurrentTerm: Term
       VotedFor: NodeId option
       Log: Map<LogIndex, LogEntry>
-      Snapshot: Snapshot option }
+      Snapshot: Snapshot option
+      SessionTable: Map<string, int64> }
 
 type VolatileState =
     { CommitIndex: LogIndex
@@ -46,7 +47,8 @@ module State =
                 { CurrentTerm = 0L
                   VotedFor = None
                   Log = Log.empty
-                  Snapshot = None }
+                  Snapshot = None
+                  SessionTable = Map.empty }
 
         let configPhase, updatedConfig =
             let latestChange =
@@ -169,6 +171,12 @@ module State =
                 { state.Volatile with
                     CommitIndex = max state.Volatile.CommitIndex lastAppliedIndex
                     LastApplied = max state.Volatile.LastApplied lastAppliedIndex } }
+
+    let updateSessionTable clientId seqNum state =
+        { state with
+            Persistent =
+                { state.Persistent with
+                    SessionTable = state.Persistent.SessionTable |> Map.add clientId seqNum } }
 
     let updateConfig peers state =
         { state with

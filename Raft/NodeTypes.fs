@@ -17,7 +17,11 @@ type NodeMessage =
     | ElectionTimeout
     | HeartbeatTimeout
     | GetState of AsyncReplyChannel<RaftState>
-    | ClientCommand of command: string * AsyncReplyChannel<ClientCommandResult>
+    | ClientCommand of
+        command: string *
+        clientId: string option *
+        seqNum: int64 option *
+        AsyncReplyChannel<ClientCommandResult>
     | LinearizableRead of AsyncReplyChannel<ReadCommandResult>
     | TakeSnapshot of data: string * AsyncReplyChannel<unit>
     | AddPeer of PeerInfo * AsyncReplyChannel<bool>

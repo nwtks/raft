@@ -46,7 +46,10 @@ type RaftNode
     do agent.Start()
 
     member _.SubmitCommand cmd =
-        agent.PostAndReply(fun ch -> ClientCommand(cmd, ch))
+        agent.PostAndReply(fun ch -> ClientCommand(cmd, None, None, ch))
+
+    member _.SubmitCommandWithSession(cmd, clientId, seqNum) =
+        agent.PostAndReply(fun ch -> ClientCommand(cmd, Some clientId, Some seqNum, ch))
 
     member _.LinearizableRead() =
         agent.PostAndReply(fun ch -> LinearizableRead ch)

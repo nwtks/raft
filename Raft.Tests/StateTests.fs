@@ -20,8 +20,15 @@ let ``State.init with persisted state restores CurrentTerm, VotedFor, and Log co
     let loaded: PersistentState =
         { CurrentTerm = 5L
           VotedFor = Some 2
-          Log = logFromList [ { Index = 1L; Term = 4L; Command = "x" } ]
-          Snapshot = None }
+          Log =
+            logFromList
+                [ { Index = 1L
+                    Term = 4L
+                    Command = "x"
+                    ClientId = None
+                    SeqNum = None } ]
+          Snapshot = None
+          SessionTable = Map.empty }
 
     let state = State.init dummyConfigStandalone (Some loaded)
 
@@ -156,9 +163,21 @@ let ``State.addVoteReceived adds to VotesReceived set`` () =
 [<Fact>]
 let ``State.takeSnapshot trims log and stores snapshot`` () =
     let entries =
-        [ { Index = 1L; Term = 1L; Command = "a" }
-          { Index = 2L; Term = 1L; Command = "b" }
-          { Index = 3L; Term = 2L; Command = "c" } ]
+        [ { Index = 1L
+            Term = 1L
+            Command = "a"
+            ClientId = None
+            SeqNum = None }
+          { Index = 2L
+            Term = 1L
+            Command = "b"
+            ClientId = None
+            SeqNum = None }
+          { Index = 3L
+            Term = 2L
+            Command = "c"
+            ClientId = None
+            SeqNum = None } ]
 
     let state =
         { State.init dummyConfig None with
@@ -167,7 +186,8 @@ let ``State.takeSnapshot trims log and stores snapshot`` () =
                 { CurrentTerm = 2L
                   VotedFor = None
                   Log = logFromList entries
-                  Snapshot = None } }
+                  Snapshot = None
+                  SessionTable = Map.empty } }
 
     let snapped = State.takeSnapshot 2L 1L "state-data" state
 

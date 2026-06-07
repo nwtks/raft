@@ -10,22 +10,47 @@ module NodeAgent =
 
             match Log.getEntry next state.Persistent.Log with
             | Some entry when entry.Command.StartsWith ConfigChange.ConfigCommandPrefix ->
+                let stateWithSession =
+                    match entry.ClientId, entry.SeqNum with
+                    | Some cId, Some sNum when
+                        state.Persistent.SessionTable |> Map.tryFind cId |> Option.defaultValue -1L < sNum
+                        ->
+                        State.updateSessionTable cId sNum state
+                    | _ -> state
+
                 match ConfigChange.parse entry.Command with
                 | Some(JointChange(oldPeers, newPeers)) ->
-                    let state2 = State.enterJointConsensus oldPeers newPeers state
+                    let state2 = State.enterJointConsensus oldPeers newPeers stateWithSession
                     loopApplyCommitted onApply state2 next
                 | Some(FinalChange newPeers) ->
-                    let state2 = State.exitJointConsensus newPeers state
+                    let state2 = State.exitJointConsensus newPeers stateWithSession
                     loopApplyCommitted onApply state2 next
                 | None ->
                     let json = entry.Command.Substring ConfigChange.ConfigCommandPrefix.Length
                     let newPeers = System.Text.Json.JsonSerializer.Deserialize<PeerInfo list> json
-                    let state2 = State.updateConfig newPeers state
+                    let state2 = State.updateConfig newPeers stateWithSession
                     loopApplyCommitted onApply state2 next
             | Some entry when entry.Command = "" -> loopApplyCommitted onApply state next
             | Some entry ->
-                onApply entry
-                loopApplyCommitted onApply state next
+                let isDuplicate =
+                    match entry.ClientId, entry.SeqNum with
+                    | Some cId, Some sNum ->
+                        state.Persistent.SessionTable |> Map.tryFind cId |> Option.defaultValue -1L
+                        >= sNum
+                    | _ -> false
+
+                let state2 =
+                    if isDuplicate then
+                        state
+                    elif entry.ClientId.IsSome && entry.SeqNum.IsSome then
+                        State.updateSessionTable entry.ClientId.Value entry.SeqNum.Value state
+                    else
+                        state
+
+                if not isDuplicate then
+                    onApply entry
+
+                loopApplyCommitted onApply state2 next
             | None -> loopApplyCommitted onApply state (next + 1L)
         else
             state, lastApplied
@@ -173,14 +198,28 @@ module NodeAgent =
 
     let handleLocalMessage ctx =
         function
-        | ClientCommand(cmd, replyChannel) ->
+        | ClientCommand(cmd, clientId, seqNum, replyChannel) ->
             if ctx.State.Role = Leader then
-                let state = Replication.appendCommand cmd ctx.State
-                saveIfChanged ctx state
-                NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state
-                let appliedState = applyCommitted ctx.OnApply state
-                replyChannel.Reply Accepted
-                tryFinalizeConfiguration (autoSnapshotIfNeeded ctx appliedState)
+                match clientId, seqNum with
+                | Some cId, Some sNum ->
+                    match ctx.State.Persistent.SessionTable |> Map.tryFind cId with
+                    | Some lastSeq when sNum <= lastSeq ->
+                        replyChannel.Reply Accepted
+                        ctx.State
+                    | _ ->
+                        let state = Replication.appendCommandWithSession cmd cId sNum ctx.State
+                        saveIfChanged ctx state
+                        NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state
+                        let appliedState = applyCommitted ctx.OnApply state
+                        replyChannel.Reply Accepted
+                        tryFinalizeConfiguration (autoSnapshotIfNeeded ctx appliedState)
+                | _ ->
+                    let state = Replication.appendCommand cmd ctx.State
+                    saveIfChanged ctx state
+                    NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state
+                    let appliedState = applyCommitted ctx.OnApply state
+                    replyChannel.Reply Accepted
+                    tryFinalizeConfiguration (autoSnapshotIfNeeded ctx appliedState)
             else
                 let leaderInfo =
                     ctx.State.CurrentLeader
