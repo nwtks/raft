@@ -654,7 +654,38 @@ let ``Leader RaftNode serves LinearizableRead after committing entry in current 
         Assert.Equal(1L, state.Volatile.CommitIndex)
         Assert.Equal(1L, state.Volatile.LastApplied)
 
-        Assert.Equal(ReadReady, node.LinearizableRead())
+        let readResult = ref Unchecked.defaultof<ReadCommandResult>
+        let readDone = new System.Threading.ManualResetEventSlim(false)
+
+        System.Threading.ThreadPool.QueueUserWorkItem(fun _ ->
+            readResult.Value <- node.LinearizableRead()
+            readDone.Set())
+        |> ignore
+
+        node.GetState() |> ignore
+
+        transport.ReceiveMessage(
+            AppendEntriesResponseMsg
+                { FollowerTerm = term
+                  Success = true
+                  MatchIndex = 1L
+                  FollowerId = 2
+                  ConflictTerm = 0L
+                  ConflictIndex = 0L }
+        )
+
+        transport.ReceiveMessage(
+            AppendEntriesResponseMsg
+                { FollowerTerm = term
+                  Success = true
+                  MatchIndex = 1L
+                  FollowerId = 3
+                  ConflictTerm = 0L
+                  ConflictIndex = 0L }
+        )
+
+        Assert.True(readDone.Wait 5000)
+        Assert.Equal(ReadReady, readResult.Value)
     }
 
 [<Fact>]
@@ -690,7 +721,7 @@ let ``Leader RaftNode queues LinearizableRead until committed entry in current t
             readDone.Set())
         |> ignore
 
-        do! System.Threading.Tasks.Task.Delay 500
+        node.GetState() |> ignore
 
         transport.ReceiveMessage(
             AppendEntriesResponseMsg

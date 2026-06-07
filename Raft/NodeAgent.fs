@@ -66,14 +66,22 @@ module NodeAgent =
             ctx.Persistence.Save newState.Persistent
 
     let processPendingReads pendingReads state =
-        let canServe =
-            state.Role = Leader
-            && state.Volatile.CommitIndex > 0L
-            && Log.termAt state.Volatile.CommitIndex state.Persistent.Log = state.Persistent.CurrentTerm
-
         pendingReads
         |> List.filter (fun pr ->
-            if canServe && state.Volatile.LastApplied >= pr.ReadIndex then
+            let canServe =
+                state.Role = Leader
+                && state.Volatile.CommitIndex > 0L
+                && Log.termAt state.Volatile.CommitIndex state.Persistent.Log = state.Persistent.CurrentTerm
+                && State.hasQuorum pr.Responses state
+
+            if state.Role <> Leader then
+                let leaderInfo =
+                    state.CurrentLeader
+                    |> Option.bind (fun leaderId -> state.Config.Peers |> List.tryFind (fun p -> p.Id = leaderId))
+
+                pr.ReplyChannel.Reply(ReadRedirect leaderInfo)
+                false
+            elif canServe && state.Volatile.LastApplied >= pr.ReadIndex then
                 pr.ReplyChannel.Reply ReadReady
                 false
             else
@@ -363,7 +371,19 @@ module NodeAgent =
                             HeartbeatTimer = heartbeatTimer }
             | RaftRPC rpcMsg ->
                 let state, electionTimer, heartbeatTimer = receiveRaftRPC ctx rpcMsg
-                let remainingReads = processPendingReads ctx.PendingReads state
+
+                let updatedPending =
+                    match rpcMsg with
+                    | AppendEntriesResponseMsg resp when
+                        state.Role = Leader && resp.FollowerTerm <= state.Persistent.CurrentTerm
+                        ->
+                        ctx.PendingReads
+                        |> List.map (fun pr ->
+                            { pr with
+                                Responses = Set.add resp.FollowerId pr.Responses })
+                    | _ -> ctx.PendingReads
+
+                let remainingReads = processPendingReads updatedPending state
 
                 let ctx2 =
                     { ctx with
@@ -389,8 +409,6 @@ module NodeAgent =
                 let state = handleLocalMessage ctx localMsg
                 let remainingReads = processPendingReads ctx.PendingReads state
 
-                // Handle role changes caused by applyCommitted inside handleLocalMessage
-                // (e.g., leader removes itself via FinalChange application).
                 let electionTimer, heartbeatTimer =
                     if oldRole <> Leader && state.Role = Leader then
                         NodeBroadcaster.broadcastHeartbeat ctx.Config ctx.Transport state
@@ -412,32 +430,27 @@ module NodeAgent =
 
                 return! agentLoop ctx2
             | LinearizableRead replyChannel ->
-                let remainingReads, ctx2 =
+                let ctx2 =
                     if ctx.State.Role = Leader then
                         let readIndex = ctx.State.Volatile.CommitIndex
+                        NodeBroadcaster.broadcastHeartbeat ctx.Config ctx.Transport ctx.State
 
-                        let canServe =
-                            ctx.State.Volatile.CommitIndex > 0L
-                            && Log.termAt ctx.State.Volatile.CommitIndex ctx.State.Persistent.Log = ctx.State.Persistent.CurrentTerm
+                        let pr =
+                            { ReadIndex = readIndex
+                              ReplyChannel = replyChannel
+                              Responses = Set.singleton ctx.State.Config.NodeId }
 
-                        if canServe && ctx.State.Volatile.LastApplied >= readIndex then
-                            replyChannel.Reply ReadReady
-                            ctx.PendingReads, ctx
-                        else
-                            let pr =
-                                { ReadIndex = readIndex
-                                  ReplyChannel = replyChannel }
+                        let remainingReads = processPendingReads (ctx.PendingReads @ [ pr ]) ctx.State
 
-                            ctx.PendingReads,
-                            { ctx with
-                                PendingReads = pr :: ctx.PendingReads }
+                        { ctx with
+                            PendingReads = remainingReads }
                     else
                         let leaderInfo =
                             ctx.State.CurrentLeader
                             |> Option.bind (fun leaderId -> ctx.Config.Peers |> List.tryFind (fun p -> p.Id = leaderId))
 
                         replyChannel.Reply(ReadRedirect leaderInfo)
-                        ctx.PendingReads, ctx
+                        ctx
 
                 return! agentLoop ctx2
             | TakeSnapshot(data, ch) ->

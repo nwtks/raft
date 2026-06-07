@@ -10,7 +10,8 @@ type ReadCommandResult =
 
 type PendingRead =
     { ReadIndex: LogIndex
-      ReplyChannel: AsyncReplyChannel<ReadCommandResult> }
+      ReplyChannel: AsyncReplyChannel<ReadCommandResult>
+      Responses: Set<NodeId> }
 
 type NodeMessage =
     | RaftRPC of RaftMessage
