@@ -10,16 +10,36 @@ module ConfigChange =
 
     let serialize =
         function
-        | FinalChange peers ->
-            let obj = {| t = "f"; p = peers |}
-            System.Text.Json.JsonSerializer.Serialize obj
         | JointChange(oldPeers, newPeers) ->
-            let obj =
-                {| t = "j"
-                   o = oldPeers
-                   n = newPeers |}
+            {| t = "j"
+               o = oldPeers
+               n = newPeers |}
+            |> System.Text.Json.JsonSerializer.Serialize
+        | FinalChange peers -> {| t = "f"; p = peers |} |> System.Text.Json.JsonSerializer.Serialize
 
-            System.Text.Json.JsonSerializer.Serialize obj
+    let parseArray (json: string) =
+        System.Text.Json.JsonSerializer.Deserialize<PeerInfo list> json
+        |> FinalChange
+        |> Some
+
+    let parseTagged (root: System.Text.Json.JsonElement) =
+        match root.TryGetProperty "t" with
+        | true, tag ->
+            match tag.GetString() with
+            | "j" ->
+                let oldP =
+                    System.Text.Json.JsonSerializer.Deserialize<PeerInfo list>(root.GetProperty("o").GetRawText())
+
+                let newP =
+                    System.Text.Json.JsonSerializer.Deserialize<PeerInfo list>(root.GetProperty("n").GetRawText())
+
+                JointChange(oldP, newP) |> Some
+            | "f" ->
+                System.Text.Json.JsonSerializer.Deserialize<PeerInfo list>(root.GetProperty("p").GetRawText())
+                |> FinalChange
+                |> Some
+            | _ -> None
+        | false, _ -> None
 
     let parse (command: string) =
         let json = command.Substring ConfigCommandPrefix.Length
@@ -29,34 +49,8 @@ module ConfigChange =
             let root = doc.RootElement
 
             match root.ValueKind with
-            | System.Text.Json.JsonValueKind.Array ->
-                let peers = System.Text.Json.JsonSerializer.Deserialize<PeerInfo list>(json)
-                Some(FinalChange peers)
-            | System.Text.Json.JsonValueKind.Object ->
-                match root.TryGetProperty "t" with
-                | true, tag ->
-                    match tag.GetString() with
-                    | "j" ->
-                        let oldP =
-                            System.Text.Json.JsonSerializer.Deserialize<PeerInfo list>(
-                                root.GetProperty("o").GetRawText()
-                            )
-
-                        let newP =
-                            System.Text.Json.JsonSerializer.Deserialize<PeerInfo list>(
-                                root.GetProperty("n").GetRawText()
-                            )
-
-                        Some(JointChange(oldP, newP))
-                    | "f" ->
-                        let peers =
-                            System.Text.Json.JsonSerializer.Deserialize<PeerInfo list>(
-                                root.GetProperty("p").GetRawText()
-                            )
-
-                        Some(FinalChange peers)
-                    | _ -> None
-                | false, _ -> None
+            | System.Text.Json.JsonValueKind.Array -> parseArray json
+            | System.Text.Json.JsonValueKind.Object -> parseTagged root
             | _ -> None
         with _ ->
             None

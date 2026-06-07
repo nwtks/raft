@@ -505,7 +505,7 @@ let ``Leader replicates commands to followers who both commit and apply`` () =
 
     // 5. Apply committed on leader (noop@1 is skipped, cmd1@2 and cmd2@3 are applied)
     let applied = ResizeArray<string>()
-    s1 <- NodeAgent.applyCommitted (fun e -> applied.Add e.Command) s1
+    s1 <- NodeApply.applyCommitted (fun e -> applied.Add e.Command) s1
     Assert.Equal(2, applied.Count)
     Assert.Contains("cmd1", applied)
     Assert.Contains("cmd2", applied)
@@ -522,8 +522,8 @@ let ``Leader replicates commands to followers who both commit and apply`` () =
     Assert.Equal(3L, s2.Volatile.CommitIndex)
     Assert.Equal(3L, s3.Volatile.CommitIndex)
 
-    s2 <- NodeAgent.applyCommitted (fun _ -> ()) s2
-    s3 <- NodeAgent.applyCommitted (fun _ -> ()) s3
+    s2 <- NodeApply.applyCommitted (fun _ -> ()) s2
+    s3 <- NodeApply.applyCommitted (fun _ -> ()) s3
     Assert.Equal(3L, s2.Volatile.LastApplied)
     Assert.Equal(3L, s3.Volatile.LastApplied)
 
@@ -575,7 +575,7 @@ let ``takeSnapshot on leader trims log and snapshot is installable on follower``
     Assert.Equal(4L, s1.Volatile.CommitIndex)
 
     // 3. Apply committed on leader (noop is skipped)
-    s1 <- NodeAgent.applyCommitted (fun _ -> ()) s1
+    s1 <- NodeApply.applyCommitted (fun _ -> ()) s1
     Assert.Equal(4L, s1.Volatile.LastApplied)
 
     // 4. Take snapshot at index 2 on leader

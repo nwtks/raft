@@ -4,15 +4,17 @@ module NodeTimer =
     let getRandomElectionTimeout config =
         System.Random.Shared.Next(config.ElectionTimeoutMinMs, config.ElectionTimeoutMaxMs)
 
+    let createTimer (inbox: MailboxProcessor<NodeMessage>) msg interval =
+        new System.Threading.Timer((fun _ -> inbox.Post msg), null, interval, System.Threading.Timeout.Infinite)
+
+    let changeTimer (timer: System.Threading.Timer) interval =
+        timer.Change(interval, System.Threading.Timeout.Infinite) |> ignore
+        timer
+
     let resetTimer (inbox: MailboxProcessor<NodeMessage>) (timer: System.Threading.Timer option) msg interval =
         match timer with
-        | Some t ->
-            t.Change(interval, System.Threading.Timeout.Infinite) |> ignore
-            Some t
-        | None ->
-            Some(
-                new System.Threading.Timer((fun _ -> inbox.Post msg), null, interval, System.Threading.Timeout.Infinite)
-            )
+        | Some t -> Some(changeTimer t interval)
+        | None -> Some(createTimer inbox msg interval)
 
     let stopTimer (timer: System.Threading.Timer option) =
         match timer with

@@ -657,10 +657,9 @@ let ``Leader RaftNode serves LinearizableRead after committing entry in current 
         let readResult = ref Unchecked.defaultof<ReadCommandResult>
         let readDone = new System.Threading.ManualResetEventSlim(false)
 
-        System.Threading.ThreadPool.QueueUserWorkItem(fun _ ->
-            readResult.Value <- node.LinearizableRead()
+        node.PostLinearizableRead(fun r ->
+            readResult.Value <- r
             readDone.Set())
-        |> ignore
 
         node.GetState() |> ignore
 
@@ -716,10 +715,9 @@ let ``Leader RaftNode queues LinearizableRead until committed entry in current t
         let readResult = ref Unchecked.defaultof<ReadCommandResult>
         let readDone = new System.Threading.ManualResetEventSlim(false)
 
-        System.Threading.ThreadPool.QueueUserWorkItem(fun _ ->
-            readResult.Value <- node.LinearizableRead()
+        node.PostLinearizableRead(fun r ->
+            readResult.Value <- r
             readDone.Set())
-        |> ignore
 
         node.GetState() |> ignore
 

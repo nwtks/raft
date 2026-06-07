@@ -20,22 +20,23 @@ module Election =
           LastLogIndex = Log.lastIndex state.Persistent.Log
           LastLogTerm = Log.lastTerm state.Persistent.Log }
 
+    let canVoteFor candidateId state =
+        state.Persistent.VotedFor = None || state.Persistent.VotedFor = Some candidateId
+
+    let isLogUpToDate candidateLastTerm candidateLastIndex state =
+        let myLastTerm = Log.lastTerm state.Persistent.Log
+        let myLastIndex = Log.lastIndex state.Persistent.Log
+
+        candidateLastTerm > myLastTerm
+        || candidateLastTerm = myLastTerm && candidateLastIndex >= myLastIndex
+
     let handleRequestVote rv state =
         let state2 = State.updateTerm rv.CandidateTerm state
 
-        let canVote =
+        let grant =
             rv.CandidateTerm >= state2.Persistent.CurrentTerm
-            && (state2.Persistent.VotedFor = None
-                || state2.Persistent.VotedFor = Some rv.CandidateId)
-
-        let logUpToDate =
-            let myLastTerm = Log.lastTerm state2.Persistent.Log
-            let myLastIndex = Log.lastIndex state2.Persistent.Log
-
-            rv.LastLogTerm > myLastTerm
-            || rv.LastLogTerm = myLastTerm && rv.LastLogIndex >= myLastIndex
-
-        let grant = canVote && logUpToDate
+            && canVoteFor rv.CandidateId state2
+            && isLogUpToDate rv.LastLogTerm rv.LastLogIndex state2
 
         let newState =
             if grant then
@@ -43,12 +44,10 @@ module Election =
             else
                 state2
 
-        let response =
-            { VoterId = newState.Config.NodeId
-              VoterTerm = newState.Persistent.CurrentTerm
-              VoteGranted = grant }
-
-        newState, response
+        newState,
+        { VoterId = newState.Config.NodeId
+          VoterTerm = newState.Persistent.CurrentTerm
+          VoteGranted = grant }
 
     let handleVoteResponse fromNode resp state =
         if resp.VoterTerm > state.Persistent.CurrentTerm then

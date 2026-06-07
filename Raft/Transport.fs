@@ -24,6 +24,69 @@ module Transport =
                     return! readAsync stream ct buffer (offset + bytesRead) (count - bytesRead) (acc + bytesRead)
         }
 
+    let readLengthPrefix (stream: System.Net.Sockets.NetworkStream) ct =
+        async {
+            let lenBuf = Array.zeroCreate 4
+            let! lenRead = readAsync stream ct lenBuf 0 4 0
+
+            if lenRead < 4 then
+                return 0
+            else
+                return
+                    int lenBuf.[0] <<< 24
+                    ||| (int lenBuf.[1] <<< 16)
+                    ||| (int lenBuf.[2] <<< 8)
+                    ||| int lenBuf.[3]
+        }
+
+    let readAndDispatch stream ct postMessage =
+        async {
+            let! msgLen = readLengthPrefix stream ct
+
+            if msgLen = 0 then
+                return false
+            else
+                let msgBuf = Array.zeroCreate msgLen
+                let! msgRead = readAsync stream ct msgBuf 0 msgLen 0
+
+                if msgRead < msgLen then
+                    return false
+                else
+                    let json = System.Text.Encoding.UTF8.GetString(msgBuf, 0, msgRead)
+
+                    try
+                        let msg =
+                            System.Text.Json.JsonSerializer.Deserialize<RaftMessage>(json, JsonConfig.options)
+
+                        postMessage msg
+                    with ex ->
+                        log $"Error deserializing message: {ex.Message}."
+
+                    return true
+        }
+
+    let handleConnection
+        (tcpClient: System.Net.Sockets.TcpClient)
+        (ct: System.Threading.CancellationToken)
+        postMessage
+        =
+        async {
+            use client = tcpClient
+            use stream = client.GetStream()
+
+            try
+                while not ct.IsCancellationRequested do
+                    let! cont = readAndDispatch stream ct postMessage
+
+                    if not cont then
+                        ct.ThrowIfCancellationRequested()
+                        ()
+            with
+            | :? System.ObjectDisposedException
+            | :? System.OperationCanceledException -> ()
+            | ex -> log $"Connection handler error: {ex.Message}."
+        }
+
     let startListener config postMessage (ct: System.Threading.CancellationToken) =
         task {
             let listener =
@@ -41,56 +104,25 @@ module Transport =
 
             try
                 while not ct.IsCancellationRequested do
-                    let! client = listener.AcceptTcpClientAsync()
-
-                    async {
-                        use client = client
-                        use stream = client.GetStream()
-
-                        try
-                            while not ct.IsCancellationRequested do
-                                let lenBuf = Array.zeroCreate 4
-                                let! lenRead = readAsync stream ct lenBuf 0 4 0
-
-                                if lenRead < 4 then
-                                    ct.ThrowIfCancellationRequested()
-                                    ()
-                                else
-                                    let msgLen =
-                                        int lenBuf.[0] <<< 24
-                                        ||| (int lenBuf.[1] <<< 16)
-                                        ||| (int lenBuf.[2] <<< 8)
-                                        ||| int lenBuf.[3]
-
-                                    let msgBuf = Array.zeroCreate msgLen
-                                    let! msgRead = readAsync stream ct msgBuf 0 msgLen 0
-
-                                    if msgRead < msgLen then
-                                        ct.ThrowIfCancellationRequested()
-                                        ()
-                                    else
-                                        let json = System.Text.Encoding.UTF8.GetString(msgBuf, 0, msgRead)
-
-                                        try
-                                            let msg =
-                                                System.Text.Json.JsonSerializer.Deserialize<RaftMessage>(
-                                                    json,
-                                                    JsonConfig.options
-                                                )
-
-                                            postMessage msg
-                                        with ex ->
-                                            log $"Error deserializing message: {ex.Message}."
-                        with
-                        | :? System.ObjectDisposedException
-                        | :? System.OperationCanceledException -> ()
-                        | ex -> log $"Connection handler error: {ex.Message}."
-                    }
-                    |> Async.Start
+                    let! tcpClient = listener.AcceptTcpClientAsync()
+                    handleConnection tcpClient ct postMessage |> Async.Start
             with
             | :? System.ObjectDisposedException -> ()
             | ex -> log $"Listener error: {ex.Message}."
         }
+
+    let serializeMessage msg =
+        System.Text.Json.JsonSerializer.Serialize(msg, JsonConfig.options)
+        |> System.Text.Encoding.UTF8.GetBytes
+
+    let buildFrame (bytes: byte[]) =
+        let lenPrefix =
+            [| byte (bytes.Length >>> 24)
+               byte (bytes.Length >>> 16)
+               byte (bytes.Length >>> 8)
+               byte bytes.Length |]
+
+        lenPrefix, bytes
 
     let sendMessage (peer: PeerInfo) msg =
         task {
@@ -99,22 +131,10 @@ module Transport =
             try
                 use client = new System.Net.Sockets.TcpClient()
                 do! client.ConnectAsync(peer.Host, peer.Port, cts.Token)
-
-                let bytes =
-                    System.Text.Json.JsonSerializer.Serialize(msg, JsonConfig.options)
-                    |> System.Text.Encoding.UTF8.GetBytes
-
-                let msgLen = bytes.Length
-
-                let lenPrefix =
-                    [| byte (msgLen >>> 24)
-                       byte (msgLen >>> 16)
-                       byte (msgLen >>> 8)
-                       byte msgLen |]
-
+                let lenPrefix, payload = serializeMessage msg |> buildFrame
                 use stream = client.GetStream()
                 do! stream.WriteAsync(lenPrefix, 0, lenPrefix.Length, cts.Token)
-                do! stream.WriteAsync(bytes, 0, bytes.Length, cts.Token)
+                do! stream.WriteAsync(payload, 0, payload.Length, cts.Token)
             with
             | :? System.OperationCanceledException -> log $"Timeout connecting to {peer.Id} ({peer.Host}:{peer.Port})."
             | ex -> log $"Failed to send to {peer.Id}: {ex.Message}."

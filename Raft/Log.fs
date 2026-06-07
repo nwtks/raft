@@ -23,32 +23,34 @@ module Log =
         |> Seq.tryFindBack (fun (_, e) -> e.Term = term)
         |> Option.map fst
 
-    let append term command log =
+    let entriesFrom index log =
+        log |> Map.toList |> List.skipWhile (fun (k, _) -> k < index) |> List.map snd
+
+    let createEntry term command clientId seqNum log =
         let nextIndex = lastIndex log + 1L
 
-        let entry =
-            { Index = nextIndex
-              Term = term
-              Command = command
-              ClientId = None
-              SeqNum = None }
+        { Index = nextIndex
+          Term = term
+          Command = command
+          ClientId = clientId
+          SeqNum = seqNum }
 
+    let append term command log =
+        let entry = createEntry term command None None log
         log |> Map.add entry.Index entry
 
     let appendWithSession term command clientId seqNum log =
-        let nextIndex = lastIndex log + 1L
-
-        let entry =
-            { Index = nextIndex
-              Term = term
-              Command = command
-              ClientId = Some clientId
-              SeqNum = Some seqNum }
-
+        let entry = createEntry term command (Some clientId) (Some seqNum) log
         log |> Map.add entry.Index entry
 
-    let entriesFrom index log =
-        log |> Map.toList |> List.skipWhile (fun (k, _) -> k < index) |> List.map snd
+    let appendEntriesToLog log entries =
+        entries |> List.fold (fun m e -> Map.add e.Index e m) log
+
+    let truncateAndAppend log entry rest =
+        let before =
+            log |> Map.toSeq |> Seq.takeWhile (fun (k, _) -> k < entry.Index) |> Map.ofSeq
+
+        entry :: rest |> appendEntriesToLog before
 
     [<TailCall>]
     let rec _merge log =
@@ -56,13 +58,9 @@ module Log =
         | [] -> log
         | entry :: rest ->
             match log |> Map.tryFind entry.Index with
-            | Some existing when existing.Term <> entry.Term ->
-                let before =
-                    log |> Map.toSeq |> Seq.takeWhile (fun (k, _) -> k < entry.Index) |> Map.ofSeq
-
-                entry :: rest |> List.fold (fun m e -> Map.add e.Index e m) before
+            | Some existing when existing.Term <> entry.Term -> truncateAndAppend log entry rest
             | Some _ -> _merge log rest
-            | None -> entry :: rest |> List.fold (fun m e -> Map.add e.Index e m) log
+            | None -> entry :: rest |> appendEntriesToLog log
 
     let mergeEntries entries log = _merge log entries
 

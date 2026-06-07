@@ -54,6 +54,10 @@ type RaftNode
     member _.LinearizableRead() =
         agent.PostAndReply(fun ch -> LinearizableRead ch)
 
+    member _.PostLinearizableRead(continuation: ReadCommandResult -> unit) =
+        let asyncOp = agent.PostAndAsyncReply(fun ch -> LinearizableRead ch)
+        Async.StartWithContinuations(asyncOp, continuation, ignore, ignore)
+
     member _.SubmitTakeSnapshot data =
         agent.PostAndReply(fun ch -> TakeSnapshot(data, ch))
 

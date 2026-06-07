@@ -5,8 +5,8 @@ module Replication =
         match state.LeaderState with
         | None -> None
         | Some ls ->
-            let nextIdx = ls.NextIndex |> Map.tryFind followerId |> Option.defaultValue 1L
-            let prevLogIndex = nextIdx - 1L
+            let nextIndex = ls.NextIndex |> Map.tryFind followerId |> Option.defaultValue 1L
+            let prevLogIndex = nextIndex - 1L
 
             match state.Persistent.Snapshot with
             | Some snap when prevLogIndex < snap.LastIncludedIndex -> None
@@ -18,7 +18,7 @@ module Replication =
                       LeaderId = state.Config.NodeId
                       PrevLogIndex = prevLogIndex
                       PrevLogTerm = prevLogTerm
-                      Entries = entries nextIdx
+                      Entries = entries nextIndex
                       LeaderCommit = state.Volatile.CommitIndex }
 
     let createAppendEntries followerId state =
@@ -27,77 +27,92 @@ module Replication =
     let createHeartbeat followerId state =
         createEntries (fun _ -> []) followerId state
 
+    let isLogConsistent prevLogIndex prevLogTerm log =
+        prevLogIndex = 0L
+        || Log.termAt prevLogIndex log = prevLogTerm && prevLogIndex <= Log.lastIndex log
+
+    let calculateConflictInfo ae log =
+        if ae.PrevLogIndex > Log.lastIndex log then
+            0L, Log.lastIndex log + 1L
+        else
+            let term = Log.termAt ae.PrevLogIndex log
+
+            let firstIdx =
+                let mutable idx = ae.PrevLogIndex
+
+                while idx > 1L && Log.termAt (idx - 1L) log = term do
+                    idx <- idx - 1L
+
+                idx
+
+            term, firstIdx
+
+    let acceptAppendEntries ae state =
+        let newLog = Log.mergeEntries ae.Entries state.Persistent.Log
+
+        let newCommitIndex =
+            if ae.LeaderCommit > state.Volatile.CommitIndex then
+                let lastNewIndex =
+                    match ae.Entries with
+                    | [] -> Log.lastIndex newLog
+                    | _ -> (List.last ae.Entries).Index
+
+                min ae.LeaderCommit lastNewIndex
+            else
+                state.Volatile.CommitIndex
+
+        let newState = State.updateLogAndCommit newLog newCommitIndex state
+        let matchIdx = Log.lastIndex newLog
+
+        newState,
+        { FollowerTerm = newState.Persistent.CurrentTerm
+          Success = true
+          MatchIndex = matchIdx
+          FollowerId = newState.Config.NodeId
+          ConflictTerm = 0L
+          ConflictIndex = 0L }
+
     let handleAppendEntries (ae: AppendEntries) state =
         if ae.LeaderTerm < state.Persistent.CurrentTerm then
-            let response =
-                { FollowerTerm = state.Persistent.CurrentTerm
+            state,
+            { FollowerTerm = state.Persistent.CurrentTerm
+              Success = false
+              MatchIndex = 0L
+              FollowerId = state.Config.NodeId
+              ConflictTerm = 0L
+              ConflictIndex = 0L }
+        else
+            let newState = State.followLeader ae.LeaderTerm ae.LeaderId state
+
+            if isLogConsistent ae.PrevLogIndex ae.PrevLogTerm newState.Persistent.Log then
+                acceptAppendEntries ae newState
+            else
+                let conflictTerm, conflictIndex = calculateConflictInfo ae newState.Persistent.Log
+
+                newState,
+                { FollowerTerm = newState.Persistent.CurrentTerm
                   Success = false
                   MatchIndex = 0L
-                  FollowerId = state.Config.NodeId
-                  ConflictTerm = 0L
-                  ConflictIndex = 0L }
+                  FollowerId = newState.Config.NodeId
+                  ConflictTerm = conflictTerm
+                  ConflictIndex = conflictIndex }
 
-            state, response
+    let updateMatchIndices (resp: AppendEntriesResponse) leaderState =
+        let newMatchIndex =
+            leaderState.MatchIndex |> Map.add resp.FollowerId resp.MatchIndex
+
+        let newNextIndex =
+            leaderState.NextIndex |> Map.add resp.FollowerId (resp.MatchIndex + 1L)
+
+        newNextIndex, newMatchIndex
+
+    let calculateBackoffNextIndex (resp: AppendEntriesResponse) log =
+        if resp.ConflictTerm = 0L then
+            max 1L resp.ConflictIndex
         else
-            let state2 = State.followLeader ae.LeaderTerm ae.LeaderId state
-
-            let logOk =
-                ae.PrevLogIndex = 0L
-                || Log.termAt ae.PrevLogIndex state2.Persistent.Log = ae.PrevLogTerm
-                   && ae.PrevLogIndex <= Log.lastIndex state2.Persistent.Log
-
-            if logOk then
-                let newLog = Log.mergeEntries ae.Entries state2.Persistent.Log
-
-                let newCommitIndex =
-                    if ae.LeaderCommit > state2.Volatile.CommitIndex then
-                        let lastNewIndex =
-                            match ae.Entries with
-                            | [] -> Log.lastIndex newLog
-                            | _ -> (List.last ae.Entries).Index
-
-                        min ae.LeaderCommit lastNewIndex
-                    else
-                        state2.Volatile.CommitIndex
-
-                let newState = State.updateLogAndCommit newLog newCommitIndex state2
-                let matchIdx = Log.lastIndex newLog
-
-                let response =
-                    { FollowerTerm = newState.Persistent.CurrentTerm
-                      Success = true
-                      MatchIndex = matchIdx
-                      FollowerId = newState.Config.NodeId
-                      ConflictTerm = 0L
-                      ConflictIndex = 0L }
-
-                newState, response
-            else
-                let conflictTerm, conflictIndex =
-                    if ae.PrevLogIndex > Log.lastIndex state2.Persistent.Log then
-                        0L, Log.lastIndex state2.Persistent.Log + 1L
-                    else
-                        let term = Log.termAt ae.PrevLogIndex state2.Persistent.Log
-
-                        let firstIdx =
-                            let mutable idx = ae.PrevLogIndex
-
-                            while idx > 1L && Log.termAt (idx - 1L) state2.Persistent.Log = term do
-                                idx <- idx - 1L
-
-                            idx
-
-                        term, firstIdx
-
-                let response =
-                    { FollowerTerm = state2.Persistent.CurrentTerm
-                      Success = false
-                      MatchIndex = 0L
-                      FollowerId = state2.Config.NodeId
-                      ConflictTerm = conflictTerm
-                      ConflictIndex = conflictIndex }
-
-                state2, response
+            match Log.lastIndexOfTerm resp.ConflictTerm log with
+            | None -> max 1L resp.ConflictIndex
+            | Some lastIdx -> max 1L lastIdx
 
     let handleAppendEntriesResponse (resp: AppendEntriesResponse) state =
         if resp.FollowerTerm > state.Persistent.CurrentTerm then
@@ -109,18 +124,10 @@ module Replication =
             | None -> state
             | Some ls ->
                 if resp.Success then
-                    let newMatchIndex = ls.MatchIndex |> Map.add resp.FollowerId resp.MatchIndex
-                    let newNextIndex = ls.NextIndex |> Map.add resp.FollowerId (resp.MatchIndex + 1L)
+                    let newNextIndex, newMatchIndex = updateMatchIndices resp ls
                     State.updateLeaderState newNextIndex newMatchIndex state
                 else
-                    let newNext =
-                        if resp.ConflictTerm = 0L then
-                            max 1L resp.ConflictIndex
-                        else
-                            match Log.lastIndexOfTerm resp.ConflictTerm state.Persistent.Log with
-                            | None -> max 1L resp.ConflictIndex
-                            | Some lastIdx -> max 1L lastIdx
-
+                    let newNext = calculateBackoffNextIndex resp state.Persistent.Log
                     let newNextIndex = ls.NextIndex |> Map.add resp.FollowerId newNext
                     State.updateLeaderState newNextIndex ls.MatchIndex state
 

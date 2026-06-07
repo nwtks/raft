@@ -40,6 +40,24 @@ type IPersistence =
     abstract member Load: unit -> PersistentState option
 
 module State =
+    let recoverConfigPhase (log: Map<LogIndex, LogEntry>) config =
+        let latestChange =
+            log
+            |> Map.toSeq
+            |> Seq.choose (fun (_, entry) ->
+                if entry.Command.StartsWith ConfigChange.ConfigCommandPrefix then
+                    ConfigChange.parse entry.Command
+                else
+                    None)
+            |> Seq.tryLast
+
+        match latestChange with
+        | Some(JointChange(oldPeers, newPeers)) ->
+            let unionPeers = List.append oldPeers newPeers |> List.distinct
+            JointPhase(oldPeers, newPeers), { config with Peers = unionPeers }
+        | Some(FinalChange peers) -> SinglePhase, { config with Peers = peers }
+        | None -> SinglePhase, config
+
     let init config loadedState =
         let persistent =
             match loadedState with
@@ -51,23 +69,7 @@ module State =
                   Snapshot = None
                   SessionTable = Map.empty }
 
-        let configPhase, updatedConfig =
-            let latestChange =
-                persistent.Log
-                |> Map.toSeq
-                |> Seq.choose (fun (_, entry) ->
-                    if entry.Command.StartsWith ConfigChange.ConfigCommandPrefix then
-                        ConfigChange.parse entry.Command
-                    else
-                        None)
-                |> Seq.tryLast
-
-            match latestChange with
-            | Some(JointChange(oldPeers, newPeers)) ->
-                let unionPeers = List.append oldPeers newPeers |> List.distinct
-                JointPhase(oldPeers, newPeers), { config with Peers = unionPeers }
-            | Some(FinalChange peers) -> SinglePhase, { config with Peers = peers }
-            | None -> SinglePhase, config
+        let configPhase, updatedConfig = recoverConfigPhase persistent.Log config
 
         { Role = Follower
           Persistent = persistent
@@ -96,12 +98,12 @@ module State =
             LeaderState = Some leaderState
             CurrentLeader = Some state.Config.NodeId }
 
-    let updateTerm newTerm state =
-        if newTerm > state.Persistent.CurrentTerm then
+    let updateTerm term state =
+        if term > state.Persistent.CurrentTerm then
             { state with
                 Persistent =
                     { state.Persistent with
-                        CurrentTerm = newTerm
+                        CurrentTerm = term
                         VotedFor = None }
                 Role = Follower
                 LeaderState = None
@@ -109,45 +111,45 @@ module State =
         else
             state
 
-    let updateLog newLog state =
+    let updateLog log state =
         { state with
-            Persistent = { state.Persistent with Log = newLog } }
+            Persistent = { state.Persistent with Log = log } }
 
-    let updateLogAndCommit newLog newCommitIndex state =
+    let updateLogAndCommit log commitIndex state =
         { state with
-            Persistent = { state.Persistent with Log = newLog }
+            Persistent = { state.Persistent with Log = log }
             Volatile =
                 { state.Volatile with
-                    CommitIndex = newCommitIndex } }
+                    CommitIndex = commitIndex } }
 
-    let updateCommitIndex newCommitIndex state =
-        { state with
-            Volatile =
-                { state.Volatile with
-                    CommitIndex = newCommitIndex } }
-
-    let updateLastApplied newLastApplied state =
+    let updateCommitIndex commitIndex state =
         { state with
             Volatile =
                 { state.Volatile with
-                    LastApplied = newLastApplied } }
+                    CommitIndex = commitIndex } }
+
+    let updateLastApplied lastApplied state =
+        { state with
+            Volatile =
+                { state.Volatile with
+                    LastApplied = lastApplied } }
 
     let followLeader leaderTerm leaderId state =
-        let s = updateTerm leaderTerm state
+        let newState = updateTerm leaderTerm state
 
-        { s with
+        { newState with
             Role = Follower
             CurrentLeader = Some leaderId }
 
-    let updateLeaderState newNextIndex newMatchIndex state =
+    let updateLeaderState nextIndex matchIndex state =
         match state.LeaderState with
         | Some ls ->
             { state with
                 LeaderState =
                     Some
                         { ls with
-                            NextIndex = newNextIndex
-                            MatchIndex = newMatchIndex } }
+                            NextIndex = nextIndex
+                            MatchIndex = matchIndex } }
         | None -> state
 
     let recordVote candidateId state =
@@ -160,12 +162,12 @@ module State =
         { state with
             VotesReceived = state.VotesReceived |> Set.add nodeId }
 
-    let takeSnapshot lastAppliedIndex lastAppliedTerm data state =
-        let newLog = Log.trim lastAppliedIndex lastAppliedTerm state.Persistent.Log
+    let takeSnapshot lastIndex lastTerm data state =
+        let newLog = Log.trim lastIndex lastTerm state.Persistent.Log
 
-        let snapshot: Snapshot =
-            { LastIncludedIndex = lastAppliedIndex
-              LastIncludedTerm = lastAppliedTerm
+        let snapshot =
+            { LastIncludedIndex = lastIndex
+              LastIncludedTerm = lastTerm
               StateMachineData = data }
 
         { state with
@@ -175,8 +177,8 @@ module State =
                     Snapshot = Some snapshot }
             Volatile =
                 { state.Volatile with
-                    CommitIndex = max state.Volatile.CommitIndex lastAppliedIndex
-                    LastApplied = max state.Volatile.LastApplied lastAppliedIndex } }
+                    CommitIndex = max state.Volatile.CommitIndex lastIndex
+                    LastApplied = max state.Volatile.LastApplied lastIndex } }
 
     let updateSessionTable clientId seqNum state =
         { state with
@@ -196,15 +198,15 @@ module State =
             ConfigPhase = JointPhase(oldPeers, newPeers)
             Config = { state.Config with Peers = unionPeers } }
 
-    let exitJointConsensus newPeers state =
+    let exitJointConsensus peers state =
         let newState =
             { state with
                 ConfigPhase = SinglePhase
-                Config = { state.Config with Peers = newPeers } }
+                Config = { state.Config with Peers = peers } }
 
         let leaderExplicitlyRemoved =
             state.Config.Peers |> List.exists (fun p -> p.Id = state.Config.NodeId)
-            && not (newPeers |> List.exists (fun p -> p.Id = state.Config.NodeId))
+            && not (peers |> List.exists (fun p -> p.Id = state.Config.NodeId))
 
         if leaderExplicitlyRemoved then
             { newState with
@@ -215,24 +217,16 @@ module State =
         else
             newState
 
+    let hasQuorumJoint supporters oldPeers newPeers nodeId =
+        let oldIds = oldPeers |> List.map (fun p -> p.Id) |> Set.ofList |> Set.add nodeId
+        let newIds = newPeers |> List.map (fun p -> p.Id) |> Set.ofList |> Set.add nodeId
+        let inOld = Set.intersect supporters oldIds |> Set.count
+        let inNew = Set.intersect supporters newIds |> Set.count
+        inOld >= Set.count oldIds / 2 + 1 && inNew >= Set.count newIds / 2 + 1
+
     let hasQuorum supporters state =
         match state.ConfigPhase with
         | SinglePhase ->
             let total = List.length state.Config.Peers + 1
             Set.count supporters >= total / 2 + 1
-        | JointPhase(oldPeers, newPeers) ->
-            let oldIds =
-                oldPeers
-                |> List.map (fun p -> p.Id)
-                |> Set.ofList
-                |> Set.add state.Config.NodeId
-
-            let newIds =
-                newPeers
-                |> List.map (fun p -> p.Id)
-                |> Set.ofList
-                |> Set.add state.Config.NodeId
-
-            let inOld = Set.intersect supporters oldIds |> Set.count
-            let inNew = Set.intersect supporters newIds |> Set.count
-            inOld >= Set.count oldIds / 2 + 1 && inNew >= Set.count newIds / 2 + 1
+        | JointPhase(oldPeers, newPeers) -> hasQuorumJoint supporters oldPeers newPeers state.Config.NodeId
