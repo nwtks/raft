@@ -66,7 +66,7 @@ module State =
             | Some(JointChange(oldPeers, newPeers)) ->
                 let unionPeers = List.append oldPeers newPeers |> List.distinct
                 JointPhase(oldPeers, newPeers), { config with Peers = unionPeers }
-            | Some(FinalChange _)
+            | Some(FinalChange peers) -> SinglePhase, { config with Peers = peers }
             | None -> SinglePhase, config
 
         { Role = Follower
