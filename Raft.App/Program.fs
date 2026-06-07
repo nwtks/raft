@@ -46,15 +46,19 @@ let printState (node: RaftNode) =
     printfn "CommitIndex: %d, LastApplied: %d" st.Volatile.CommitIndex st.Volatile.LastApplied
     printfn "Log entries: %d" st.Persistent.Log.Count
 
-let getValue (cmd: string) kvs kvsLock =
+let getValue (cmd: string) (node: RaftNode) kvs kvsLock =
     let p = cmd.Split ' '
 
     if p.Length = 2 then
-        let v = lock kvsLock (fun () -> kvs |> Map.tryFind p.[1])
+        match node.LinearizableRead() with
+        | ReadReady ->
+            let v = lock kvsLock (fun () -> kvs |> Map.tryFind p.[1])
 
-        match v with
-        | Some v -> printfn "%s" v
-        | None -> printfn "(not found)"
+            match v with
+            | Some v -> printfn "%s" v
+            | None -> printfn "(not found)"
+        | ReadRedirect None -> printfn "Error: Not the leader, and current leader is unknown."
+        | ReadRedirect(Some leader) -> printfn "Redirect: leader is Node %d at %s:%d" leader.Id leader.Host leader.Port
 
 let submitCommand cmd (node: RaftNode) =
     match node.SubmitCommand cmd with
@@ -78,7 +82,7 @@ let rec inputLoop node kvs kvsLock =
             printState node
             inputLoop node kvs kvsLock
         | cmd when cmd.StartsWith "get " ->
-            getValue cmd kvs kvsLock
+            getValue cmd node kvs kvsLock
             inputLoop node kvs kvsLock
         | cmd when cmd.StartsWith "put " ->
             submitCommand cmd node

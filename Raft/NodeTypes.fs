@@ -4,12 +4,21 @@ type ClientCommandResult =
     | Accepted
     | Redirect of leader: PeerInfo option
 
+type ReadCommandResult =
+    | ReadReady
+    | ReadRedirect of PeerInfo option
+
+type PendingRead =
+    { ReadIndex: LogIndex
+      ReplyChannel: AsyncReplyChannel<ReadCommandResult> }
+
 type NodeMessage =
     | RaftRPC of RaftMessage
     | ElectionTimeout
     | HeartbeatTimeout
     | GetState of AsyncReplyChannel<RaftState>
     | ClientCommand of command: string * AsyncReplyChannel<ClientCommandResult>
+    | LinearizableRead of AsyncReplyChannel<ReadCommandResult>
     | TakeSnapshot of data: string * AsyncReplyChannel<unit>
     | AddPeer of PeerInfo * AsyncReplyChannel<bool>
     | RemovePeer of NodeId * AsyncReplyChannel<bool>
@@ -35,4 +44,5 @@ type NodeContext =
       State: RaftState
       ElectionTimer: System.Threading.Timer option
       HeartbeatTimer: System.Threading.Timer option
-      CancellationTokenSource: System.Threading.CancellationTokenSource }
+      CancellationTokenSource: System.Threading.CancellationTokenSource
+      PendingReads: PendingRead list }

@@ -28,7 +28,8 @@ type RaftNode
                   State = State.init config loadedState
                   ElectionTimer = None
                   HeartbeatTimer = None
-                  CancellationTokenSource = cts }
+                  CancellationTokenSource = cts
+                  PendingReads = [] }
 
             NodeAgent.agentLoop
                 { ctx with
@@ -46,6 +47,9 @@ type RaftNode
 
     member _.SubmitCommand cmd =
         agent.PostAndReply(fun ch -> ClientCommand(cmd, ch))
+
+    member _.LinearizableRead() =
+        agent.PostAndReply(fun ch -> LinearizableRead ch)
 
     member _.SubmitTakeSnapshot data =
         agent.PostAndReply(fun ch -> TakeSnapshot(data, ch))

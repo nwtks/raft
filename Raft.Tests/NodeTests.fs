@@ -535,3 +535,130 @@ let ``RaftNode.SubmitTakeSnapshot with committed entries trims log`` () =
         Assert.True(state.Persistent.Log.ContainsKey 3L)
         Assert.Equal("", state.Persistent.Log.[3L].Command)
     }
+
+[<Fact>]
+let ``Follower RaftNode redirects LinearizableRead to current leader`` () =
+    task {
+        let config = configWithPeers 1 16017
+        let transport = MockTransport()
+        let persistence = MockPersistence()
+        let node = new RaftNode(config, transport, persistence, ignore)
+
+        match node.LinearizableRead() with
+        | ReadRedirect None -> ()
+        | _ -> Assert.Fail "Expected ReadRedirect None for follower without leader"
+    }
+
+[<Fact>]
+let ``Leader RaftNode serves LinearizableRead after committing entry in current term`` () =
+    task {
+        let config = configWithPeers 1 16018
+        let transport = MockTransport()
+        let persistence = MockPersistence()
+        let applied = ResizeArray<LogEntry>()
+        let node = new RaftNode(config, transport, persistence, (fun e -> applied.Add e))
+
+        node.TriggerElectionTimeout()
+
+        let term = (node.GetState()).Persistent.CurrentTerm
+
+        transport.ReceiveMessage(
+            RequestVoteResponseMsg
+                { VoterId = 2
+                  VoterTerm = term
+                  VoteGranted = true }
+        )
+
+        transport.ReceiveMessage(
+            RequestVoteResponseMsg
+                { VoterId = 3
+                  VoterTerm = term
+                  VoteGranted = true }
+        )
+
+        transport.ReceiveMessage(
+            AppendEntriesResponseMsg
+                { FollowerTerm = term
+                  Success = true
+                  MatchIndex = 1L
+                  FollowerId = 2
+                  ConflictTerm = 0L
+                  ConflictIndex = 0L }
+        )
+
+        transport.ReceiveMessage(
+            AppendEntriesResponseMsg
+                { FollowerTerm = term
+                  Success = true
+                  MatchIndex = 1L
+                  FollowerId = 3
+                  ConflictTerm = 0L
+                  ConflictIndex = 0L }
+        )
+
+        let state = node.GetState()
+        Assert.Equal(Leader, state.Role)
+        Assert.Equal(1L, state.Volatile.CommitIndex)
+        Assert.Equal(1L, state.Volatile.LastApplied)
+
+        Assert.Equal(ReadReady, node.LinearizableRead())
+    }
+
+[<Fact>]
+let ``Leader RaftNode queues LinearizableRead until committed entry in current term is applied`` () =
+    task {
+        let config = configWithPeers 1 16019
+        let transport = MockTransport()
+        let persistence = MockPersistence()
+        let node = new RaftNode(config, transport, persistence, ignore)
+
+        node.TriggerElectionTimeout()
+        let term = (node.GetState()).Persistent.CurrentTerm
+
+        transport.ReceiveMessage(
+            RequestVoteResponseMsg
+                { VoterId = 2
+                  VoterTerm = term
+                  VoteGranted = true }
+        )
+
+        transport.ReceiveMessage(
+            RequestVoteResponseMsg
+                { VoterId = 3
+                  VoterTerm = term
+                  VoteGranted = true }
+        )
+
+        let readResult = ref Unchecked.defaultof<ReadCommandResult>
+        let readDone = new System.Threading.ManualResetEventSlim(false)
+
+        System.Threading.ThreadPool.QueueUserWorkItem(fun _ ->
+            readResult.Value <- node.LinearizableRead()
+            readDone.Set())
+        |> ignore
+
+        do! System.Threading.Tasks.Task.Delay 500
+
+        transport.ReceiveMessage(
+            AppendEntriesResponseMsg
+                { FollowerTerm = term
+                  Success = true
+                  MatchIndex = 1L
+                  FollowerId = 2
+                  ConflictTerm = 0L
+                  ConflictIndex = 0L }
+        )
+
+        transport.ReceiveMessage(
+            AppendEntriesResponseMsg
+                { FollowerTerm = term
+                  Success = true
+                  MatchIndex = 1L
+                  FollowerId = 3
+                  ConflictTerm = 0L
+                  ConflictIndex = 0L }
+        )
+
+        Assert.True(readDone.Wait 5000)
+        Assert.Equal(ReadReady, readResult.Value)
+    }
