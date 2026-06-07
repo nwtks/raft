@@ -42,16 +42,6 @@ let ``Log.lastIndexOfTerm returns correct index when term is found`` () =
     Assert.Equal(Some 2L, result)
 
 [<Fact>]
-let ``Log.append adds entry and returns incremented lastIndex`` () =
-    let log = Log.empty |> Log.append 1L "cmd1"
-    Assert.Equal(1L, Log.lastIndex log)
-    Assert.Equal(1L, Log.lastTerm log)
-
-    let entry = Log.getEntry 1L log
-    Assert.True entry.IsSome
-    Assert.Equal("cmd1", entry.Value.Command)
-
-[<Fact>]
 let ``Log.entriesFrom returns entries at and after given index`` () =
     let log =
         logFromList [ createEntry 1L 1L "a"; createEntry 2L 1L "b"; createEntry 3L 1L "c" ]
@@ -66,6 +56,73 @@ let ``Log.entriesFrom beyond lastIndex returns empty list`` () =
     let log = logFromList [ createEntry 1L 1L "a" ]
     let result = Log.entriesFrom 5L log
     Assert.Empty result
+
+[<Fact>]
+let ``Log.createEntry uses next sequential index`` () =
+    let log = Log.empty |> Log.append 1L "a" |> Log.append 1L "b"
+    let entry = Log.createEntry 2L "c" (Some "client-x") (Some 99L) log
+    Assert.Equal(3L, entry.Index)
+    Assert.Equal(2L, entry.Term)
+    Assert.Equal("c", entry.Command)
+    Assert.Equal(Some "client-x", entry.ClientId)
+    Assert.Equal(Some 99L, entry.SeqNum)
+
+[<Fact>]
+let ``Log.append adds entry and returns incremented lastIndex`` () =
+    let log = Log.empty |> Log.append 1L "cmd1"
+    Assert.Equal(1L, Log.lastIndex log)
+    Assert.Equal(1L, Log.lastTerm log)
+
+    let entry = Log.getEntry 1L log
+    Assert.True entry.IsSome
+    Assert.Equal("cmd1", entry.Value.Command)
+
+[<Fact>]
+let ``Log.appendWithSession creates entry with clientId and seqNum`` () =
+    let log = Log.empty |> Log.appendWithSession 1L "cmd-session" "client-1" 42L
+    Assert.Equal(1L, Log.lastIndex log)
+
+    let entry = Log.getEntry 1L log
+    Assert.True entry.IsSome
+    Assert.Equal("cmd-session", entry.Value.Command)
+    Assert.Equal(Some "client-1", entry.Value.ClientId)
+    Assert.Equal(Some 42L, entry.Value.SeqNum)
+
+[<Fact>]
+let ``Log.appendWithSession increments index correctly`` () =
+    let log =
+        Log.empty
+        |> Log.append 1L "cmd1"
+        |> Log.appendWithSession 2L "cmd2" "client-1" 1L
+        |> Log.appendWithSession 2L "cmd3" "client-2" 5L
+
+    Assert.Equal(3L, Log.lastIndex log)
+    Assert.Equal("cmd1", (Log.getEntry 1L log).Value.Command)
+    Assert.Equal(Some "client-1", (Log.getEntry 2L log).Value.ClientId)
+    Assert.Equal(Some 5L, (Log.getEntry 3L log).Value.SeqNum)
+    Assert.Equal(None, (Log.getEntry 1L log).Value.ClientId)
+    Assert.Equal(None, (Log.getEntry 1L log).Value.SeqNum)
+
+[<Fact>]
+let ``Log.appendEntriesToLog adds multiple entries in batch`` () =
+    let log = Log.empty |> Log.append 1L "a"
+
+    let entries =
+        [ { Index = 2L
+            Term = 1L
+            Command = "b"
+            ClientId = None
+            SeqNum = None }
+          { Index = 3L
+            Term = 1L
+            Command = "c"
+            ClientId = None
+            SeqNum = None } ]
+
+    let merged = Log.appendEntriesToLog log entries
+    Assert.Equal(3, merged.Count)
+    Assert.Equal("c", (Log.getEntry 3L merged).Value.Command)
+
 
 [<Fact>]
 let ``Log.mergeEntries appends new entries when no conflict exists`` () =

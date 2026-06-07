@@ -744,3 +744,158 @@ let ``Leader RaftNode queues LinearizableRead until committed entry in current t
         Assert.True(readDone.Wait 5000)
         Assert.Equal(ReadReady, readResult.Value)
     }
+
+[<Fact>]
+let ``Leader RaftNode.SubmitCommandWithSession accepts command with clientId and seqNum`` () =
+    task {
+        let config = configWithPeers 1 16023
+        let transport = MockTransport()
+        let persistence = MockPersistence()
+        let node = new RaftNode(config, transport, persistence, ignore)
+
+        node.TriggerElectionTimeout()
+        let term = (node.GetState()).Persistent.CurrentTerm
+
+        transport.ReceiveMessage(
+            RequestVoteResponseMsg
+                { VoterId = 2
+                  VoterTerm = term
+                  VoteGranted = true }
+        )
+
+        transport.ReceiveMessage(
+            RequestVoteResponseMsg
+                { VoterId = 3
+                  VoterTerm = term
+                  VoteGranted = true }
+        )
+
+        let state = node.GetState()
+        Assert.Equal(Leader, state.Role)
+
+        let result = node.SubmitCommandWithSession("put x 42", "client-1", 1L)
+        Assert.Equal(Accepted, result)
+
+        let finalState = node.GetState()
+        Assert.Equal(2, finalState.Persistent.Log.Count)
+        let entry = Map.find 2L finalState.Persistent.Log
+        Assert.Equal(Some "client-1", entry.ClientId)
+        Assert.Equal(Some 1L, entry.SeqNum)
+    }
+
+[<Fact>]
+let ``RaftNode.SubmitCommandWithSession returns Accepted for duplicate session command`` () =
+    task {
+        let config = configWithPeers 1 16024
+        let transport = MockTransport()
+        let persistence = MockPersistence()
+        let node = new RaftNode(config, transport, persistence, ignore)
+
+        node.TriggerElectionTimeout()
+        let term = (node.GetState()).Persistent.CurrentTerm
+
+        transport.ReceiveMessage(
+            RequestVoteResponseMsg
+                { VoterId = 2
+                  VoterTerm = term
+                  VoteGranted = true }
+        )
+
+        transport.ReceiveMessage(
+            RequestVoteResponseMsg
+                { VoterId = 3
+                  VoterTerm = term
+                  VoteGranted = true }
+        )
+
+        Assert.Equal(Leader, (node.GetState()).Role)
+
+        let result1 = node.SubmitCommandWithSession("put x 42", "client-1", 1L)
+        Assert.Equal(Accepted, result1)
+
+        transport.ReceiveMessage(
+            AppendEntriesResponseMsg
+                { FollowerTerm = term
+                  Success = true
+                  MatchIndex = 2L
+                  FollowerId = 2
+                  ConflictTerm = 0L
+                  ConflictIndex = 0L }
+        )
+
+        transport.ReceiveMessage(
+            AppendEntriesResponseMsg
+                { FollowerTerm = term
+                  Success = true
+                  MatchIndex = 2L
+                  FollowerId = 3
+                  ConflictTerm = 0L
+                  ConflictIndex = 0L }
+        )
+
+        node.GetState() |> ignore
+
+        let result2 = node.SubmitCommandWithSession("put x 42", "client-1", 1L)
+        Assert.Equal(Accepted, result2)
+
+        let finalState = node.GetState()
+        Assert.Equal(2, finalState.Persistent.Log.Count)
+    }
+
+[<Fact>]
+let ``RaftNode.SubmitCommandWithSession rejects older seqNum after higher seqNum was processed`` () =
+    task {
+        let config = configWithPeers 1 16025
+        let transport = MockTransport()
+        let persistence = MockPersistence()
+        let node = new RaftNode(config, transport, persistence, ignore)
+
+        node.TriggerElectionTimeout()
+        let term = (node.GetState()).Persistent.CurrentTerm
+
+        transport.ReceiveMessage(
+            RequestVoteResponseMsg
+                { VoterId = 2
+                  VoterTerm = term
+                  VoteGranted = true }
+        )
+
+        transport.ReceiveMessage(
+            RequestVoteResponseMsg
+                { VoterId = 3
+                  VoterTerm = term
+                  VoteGranted = true }
+        )
+
+        Assert.Equal(Leader, (node.GetState()).Role)
+
+        Assert.Equal(Accepted, node.SubmitCommandWithSession("cmd", "client-1", 2L))
+
+        transport.ReceiveMessage(
+            AppendEntriesResponseMsg
+                { FollowerTerm = (node.GetState()).Persistent.CurrentTerm
+                  Success = true
+                  MatchIndex = 2L
+                  FollowerId = 2
+                  ConflictTerm = 0L
+                  ConflictIndex = 0L }
+        )
+
+        transport.ReceiveMessage(
+            AppendEntriesResponseMsg
+                { FollowerTerm = (node.GetState()).Persistent.CurrentTerm
+                  Success = true
+                  MatchIndex = 2L
+                  FollowerId = 3
+                  ConflictTerm = 0L
+                  ConflictIndex = 0L }
+        )
+
+        node.GetState() |> ignore
+
+        let result = node.SubmitCommandWithSession("cmd-old", "client-1", 1L)
+        Assert.Equal(Accepted, result)
+
+        let finalState = node.GetState()
+        Assert.Equal(2, finalState.Persistent.Log.Count)
+    }

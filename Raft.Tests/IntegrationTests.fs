@@ -661,3 +661,282 @@ let ``createAppendEntries returns None when leader has no LeaderState`` () =
     let state = State.init dummyConfig None
     let ae = Replication.createAppendEntries 2 state
     Assert.True ae.IsNone
+
+[<Fact>]
+let ``Session-based duplicate detection prevents duplicate application in integration`` () =
+    let config1 =
+        { NodeId = 1
+          Host = ""
+          Port = 0
+          Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
+          ElectionTimeoutMinMs = 1
+          ElectionTimeoutMaxMs = 2
+          HeartbeatIntervalMs = 1
+          SnapshotAutoThreshold = 0 }
+
+    let config2 =
+        { config1 with
+            NodeId = 2
+            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ] }
+
+    let config3 =
+        { config1 with
+            NodeId = 3
+            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 2; Host = ""; Port = 0 } ] }
+
+    let mutable s1 = State.init config1 None
+    let mutable s2 = State.init config2 None
+    let mutable s3 = State.init config3 None
+
+    // 1. Node 1 becomes leader of Term 1
+    s1 <- Election.startElection s1
+    let rv1 = Election.createRequestVote s1
+    let rv1_s2, resp2 = Election.handleRequestVote rv1 s2
+    s2 <- rv1_s2
+    let rv1_s3, resp3 = Election.handleRequestVote rv1 s3
+    s3 <- rv1_s3
+    s1 <- Election.handleVoteResponse 2 resp2 s1
+    s1 <- Election.handleVoteResponse 3 resp3 s1
+    Assert.Equal(Leader, s1.Role)
+
+    // 2. Submit a command with session info
+    s1 <- Replication.appendCommandWithSession "cmd1" "client-1" 1L s1
+    Assert.Equal(2, s1.Persistent.Log.Count)
+
+    // 3. Duplicate submission: same clientId and seqNum (simulates retry)
+    s1 <- Replication.appendCommandWithSession "cmd1" "client-1" 1L s1
+    // Log should NOT grow — duplicate entry is appended but that's expected at
+    // the Replication level; dedup happens at the NodeAgent level via SessionTable.
+    Assert.Equal(3, s1.Persistent.Log.Count)
+
+    // 4. Replicate to followers
+    let ae_to2 = (Replication.createAppendEntries 2 s1).Value
+    let ae_to3 = (Replication.createAppendEntries 3 s1).Value
+    let r_ae2, resp_ae2 = Replication.handleAppendEntries ae_to2 s2
+    s2 <- r_ae2
+    let r_ae3, resp_ae3 = Replication.handleAppendEntries ae_to3 s3
+    s3 <- r_ae3
+    s1 <- Replication.handleAppendEntriesResponse resp_ae2 s1
+    s1 <- Replication.handleAppendEntriesResponse resp_ae3 s1
+    s1 <- Replication.advanceCommitIndex s1
+    Assert.Equal(3L, s1.Volatile.CommitIndex)
+
+    // 5. Apply committed on leader (noop@1 skipped, cmd1@2 applied, cmd1@3 applied but skipped by session dedup)
+    let applied = ResizeArray<string>()
+    s1 <- NodeApply.applyCommitted (fun e -> applied.Add e.Command) s1
+    // Only cmd1 should be applied once (index 3 is duplicate detected by SessionTable)
+    Assert.Equal(3L, s1.Volatile.LastApplied)
+    Assert.Single(applied) |> ignore
+    Assert.Equal("cmd1", applied.[0])
+
+[<Fact>]
+let ``JointConsensus config change replicates and commits on followers`` () =
+    let config1 =
+        { NodeId = 1
+          Host = ""
+          Port = 0
+          Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
+          ElectionTimeoutMinMs = 1
+          ElectionTimeoutMaxMs = 2
+          HeartbeatIntervalMs = 1
+          SnapshotAutoThreshold = 0 }
+
+    let config2 =
+        { config1 with
+            NodeId = 2
+            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ] }
+
+    let config3 =
+        { config1 with
+            NodeId = 3
+            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 2; Host = ""; Port = 0 } ] }
+
+    let mutable s1 = State.init config1 None
+    let mutable s2 = State.init config2 None
+    let mutable s3 = State.init config3 None
+
+    // 1. Node 1 becomes leader of Term 1
+    s1 <- Election.startElection s1
+    let rv1 = Election.createRequestVote s1
+    let rv1_s2, resp2 = Election.handleRequestVote rv1 s2
+    s2 <- rv1_s2
+    let rv1_s3, resp3 = Election.handleRequestVote rv1 s3
+    s3 <- rv1_s3
+    s1 <- Election.handleVoteResponse 2 resp2 s1
+    s1 <- Election.handleVoteResponse 3 resp3 s1
+    Assert.Equal(Leader, s1.Role)
+
+    // 2. Append JointConsensus entry on leader
+    let oldPeers = config1.Peers
+    let newPeers = [ { Id = 4; Host = ""; Port = 0 }; { Id = 5; Host = ""; Port = 0 } ]
+    s1 <- Replication.appendJointConsensus oldPeers newPeers s1
+    Assert.Equal(2, s1.Persistent.Log.Count)
+    let configEntry = Map.find 2L s1.Persistent.Log
+    Assert.StartsWith(ConfigChange.ConfigCommandPrefix, configEntry.Command)
+
+    // 3. Replicate config entry to followers
+    let ae_to2 = (Replication.createAppendEntries 2 s1).Value
+    let ae_to3 = (Replication.createAppendEntries 3 s1).Value
+    let r_ae2, resp_ae2 = Replication.handleAppendEntries ae_to2 s2
+    s2 <- r_ae2
+    let r_ae3, resp_ae3 = Replication.handleAppendEntries ae_to3 s3
+    s3 <- r_ae3
+    Assert.True resp_ae2.Success
+    Assert.True resp_ae3.Success
+
+    // 4. Leader processes responses and advances commit index
+    s1 <- Replication.handleAppendEntriesResponse resp_ae2 s1
+    s1 <- Replication.handleAppendEntriesResponse resp_ae3 s1
+    s1 <- Replication.advanceCommitIndex s1
+    Assert.Equal(2L, s1.Volatile.CommitIndex)
+
+    // 5. Apply committed on leader - should transition to JointPhase
+    s1 <- NodeApply.applyCommitted (fun _ -> ()) s1
+    Assert.Equal(2L, s1.Volatile.LastApplied)
+
+    match s1.ConfigPhase with
+    | JointPhase(op, np) ->
+        Assert.Equal(2, op.Length)
+        Assert.Equal(2, np.Length)
+    | _ -> Assert.Fail "Expected JointPhase"
+
+    // 6. Followers need a heartbeat to advance commit index
+    let hb_to2 = (Replication.createHeartbeat 2 s1).Value
+    let hb_to3 = (Replication.createHeartbeat 3 s1).Value
+    let r_hb2, _ = Replication.handleAppendEntries hb_to2 s2
+    s2 <- r_hb2
+    let r_hb3, _ = Replication.handleAppendEntries hb_to3 s3
+    s3 <- r_hb3
+    Assert.Equal(2L, s2.Volatile.CommitIndex)
+    Assert.Equal(2L, s3.Volatile.CommitIndex)
+
+    // 7. Apply committed on followers - they should also transition to JointPhase
+    s2 <- NodeApply.applyCommitted (fun _ -> ()) s2
+
+    match s2.ConfigPhase with
+    | JointPhase _ -> ()
+    | _ -> Assert.Fail "Expected JointPhase on follower"
+
+[<Fact>]
+let ``FinalConfiguration entry transitions from JointPhase to SinglePhase via applyCommitted`` () =
+    // Use a 3-node cluster so quorum is achievable in both configs during JointPhase
+    let config1 =
+        { NodeId = 1
+          Host = ""
+          Port = 0
+          Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
+          ElectionTimeoutMinMs = 1
+          ElectionTimeoutMaxMs = 2
+          HeartbeatIntervalMs = 1
+          SnapshotAutoThreshold = 0 }
+
+    let config2 =
+        { config1 with
+            NodeId = 2
+            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ] }
+
+    let config3 =
+        { config1 with
+            NodeId = 3
+            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 2; Host = ""; Port = 0 } ] }
+
+    let mutable s1 = State.init config1 None
+    let mutable s2 = State.init config2 None
+    let mutable s3 = State.init config3 None
+
+    // 1. Node 1 becomes leader of Term 1
+    s1 <- Election.startElection s1
+    let rv1 = Election.createRequestVote s1
+    let rv1_s2, resp2 = Election.handleRequestVote rv1 s2
+    s2 <- rv1_s2
+    let rv1_s3, resp3 = Election.handleRequestVote rv1 s3
+    s3 <- rv1_s3
+    s1 <- Election.handleVoteResponse 2 resp2 s1
+    s1 <- Election.handleVoteResponse 3 resp3 s1
+    Assert.Equal(Leader, s1.Role)
+
+    // 2. Manually enter JointPhase (simulating that JointChange was committed)
+    let oldPeers = config1.Peers
+    // New config includes existing nodes so quorum can be reached
+    let newPeers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 2; Host = ""; Port = 0 } ]
+    s1 <- State.enterJointConsensus oldPeers newPeers s1
+
+    match s1.ConfigPhase with
+    | JointPhase _ -> ()
+    | _ -> Assert.Fail "Expected JointPhase"
+
+    // 3. Append FinalConfiguration
+    s1 <- Replication.appendFinalConfiguration newPeers s1
+    Assert.Equal(2, s1.Persistent.Log.Count)
+    let finalEntry = Map.find 2L s1.Persistent.Log
+    Assert.StartsWith(ConfigChange.ConfigCommandPrefix, finalEntry.Command)
+    Assert.True(finalEntry.Command.Contains("f"))
+
+    // 4. Replicate to BOTH followers so quorum checks pass
+    let ae_to2 = (Replication.createAppendEntries 2 s1).Value
+    let r_ae2, resp_ae2 = Replication.handleAppendEntries ae_to2 s2
+    s2 <- r_ae2
+    s1 <- Replication.handleAppendEntriesResponse resp_ae2 s1
+    let ae_to3 = (Replication.createAppendEntries 3 s1).Value
+    let r_ae3, resp_ae3 = Replication.handleAppendEntries ae_to3 s3
+    s3 <- r_ae3
+    s1 <- Replication.handleAppendEntriesResponse resp_ae3 s1
+    s1 <- Replication.advanceCommitIndex s1
+    Assert.Equal(2L, s1.Volatile.CommitIndex)
+
+    // 5. Apply committed on leader - should transition to SinglePhase
+    s1 <- NodeApply.applyCommitted (fun _ -> ()) s1
+    Assert.Equal(2L, s1.Volatile.LastApplied)
+    Assert.Equal(SinglePhase, s1.ConfigPhase)
+    Assert.Equal(2, s1.Config.Peers.Length)
+    Assert.Contains(1, s1.Config.Peers |> List.map (fun p -> p.Id))
+    Assert.Contains(2, s1.Config.Peers |> List.map (fun p -> p.Id))
+
+[<Fact>]
+let ``applyCommitted skips noop entries and only applies real commands`` () =
+    let config1 =
+        { NodeId = 1
+          Host = ""
+          Port = 0
+          Peers = [ { Id = 2; Host = ""; Port = 0 } ]
+          ElectionTimeoutMinMs = 1
+          ElectionTimeoutMaxMs = 2
+          HeartbeatIntervalMs = 1
+          SnapshotAutoThreshold = 0 }
+
+    let config2 =
+        { config1 with
+            NodeId = 2
+            Peers = [ { Id = 1; Host = ""; Port = 0 } ] }
+
+    let mutable s1 = State.init config1 None
+    let mutable s2 = State.init config2 None
+
+    // 1. Node 1 becomes leader (noop@1 is appended)
+    s1 <- Election.startElection s1
+    let rv1 = Election.createRequestVote s1
+    let rv1_s2, resp2 = Election.handleRequestVote rv1 s2
+    s2 <- rv1_s2
+    s1 <- Election.handleVoteResponse 2 resp2 s1
+    Assert.Equal(Leader, s1.Role)
+    Assert.Equal(1, s1.Persistent.Log.Count)
+    Assert.Equal("", (Map.find 1L s1.Persistent.Log).Command) // noop
+
+    // 2. Append a real command
+    s1 <- Replication.appendCommand "real-cmd" s1
+    Assert.Equal(2, s1.Persistent.Log.Count)
+
+    // 3. Replicate and commit
+    let ae = (Replication.createAppendEntries 2 s1).Value
+    let r_ae, resp_ae = Replication.handleAppendEntries ae s2
+    s2 <- r_ae
+    s1 <- Replication.handleAppendEntriesResponse resp_ae s1
+    s1 <- Replication.advanceCommitIndex s1
+    Assert.Equal(2L, s1.Volatile.CommitIndex)
+
+    // 4. Apply committed — noop should be skipped, only real-cmd applied
+    let applied = ResizeArray<string>()
+    s1 <- NodeApply.applyCommitted (fun e -> applied.Add e.Command) s1
+    Assert.Equal(2L, s1.Volatile.LastApplied)
+    Assert.Single(applied) |> ignore
+    Assert.Equal("real-cmd", applied.[0])

@@ -712,6 +712,41 @@ let ``Replication.advanceCommitIndex does not advance when term does not match c
     Assert.Equal(0L, newState.Volatile.CommitIndex)
 
 [<Fact>]
+let ``Replication.appendJointConsensus appends config entry when Leader`` () =
+    let state = State.initLeaderState (State.init dummyConfig None)
+    let oldPeers = dummyConfig.Peers
+    let newPeers = [ { Id = 4; Host = ""; Port = 0 }; { Id = 5; Host = ""; Port = 0 } ]
+    let newState = Replication.appendJointConsensus oldPeers newPeers state
+
+    Assert.Equal(2, newState.Persistent.Log.Count)
+    let entry = Map.find 2L newState.Persistent.Log
+    Assert.StartsWith(ConfigChange.ConfigCommandPrefix, entry.Command)
+    Assert.True(entry.Command.Contains("j"))
+
+[<Fact>]
+let ``Replication.appendJointConsensus is no-op when not Leader`` () =
+    let state = State.init dummyConfig None
+    let newState = Replication.appendJointConsensus [] [] state
+    Assert.True(Map.isEmpty newState.Persistent.Log)
+
+[<Fact>]
+let ``Replication.appendFinalConfiguration appends final config entry when Leader`` () =
+    let state = State.initLeaderState (State.init dummyConfig None)
+    let newPeers = [ { Id = 4; Host = ""; Port = 0 } ]
+    let newState = Replication.appendFinalConfiguration newPeers state
+
+    Assert.Equal(2, newState.Persistent.Log.Count)
+    let entry = Map.find 2L newState.Persistent.Log
+    Assert.StartsWith(ConfigChange.ConfigCommandPrefix, entry.Command)
+    Assert.True(entry.Command.Contains("f"))
+
+[<Fact>]
+let ``Replication.appendFinalConfiguration is no-op when not Leader`` () =
+    let state = State.init dummyConfig None
+    let newState = Replication.appendFinalConfiguration [] state
+    Assert.True(Map.isEmpty newState.Persistent.Log)
+
+[<Fact>]
 let ``Replication.appendCommand discards command when node is not Leader`` () =
     let state = State.init dummyConfig None
     let newState = Replication.appendCommand "should fail" state
@@ -726,3 +761,31 @@ let ``Replication.appendCommand appends entry when node is Leader`` () =
     Assert.Equal(2L, (Map.find 2L newState.Persistent.Log).Index)
     Assert.Equal(0L, (Map.find 2L newState.Persistent.Log).Term)
     Assert.Equal("put x 42", (Map.find 2L newState.Persistent.Log).Command)
+
+[<Fact>]
+let ``Replication.appendCommandWithSession discards when node is not Leader`` () =
+    let state = State.init dummyConfig None
+    let newState = Replication.appendCommandWithSession "cmd" "client-1" 1L state
+    Assert.True(Map.isEmpty newState.Persistent.Log)
+
+[<Fact>]
+let ``Replication.appendCommandWithSession appends with session info when Leader`` () =
+    let state = State.initLeaderState (State.init dummyConfig None)
+    let newState = Replication.appendCommandWithSession "put x 1" "client-1" 42L state
+
+    Assert.Equal(2, newState.Persistent.Log.Count)
+    let entry = Map.find 2L newState.Persistent.Log
+    Assert.Equal("put x 1", entry.Command)
+    Assert.Equal(Some "client-1", entry.ClientId)
+    Assert.Equal(Some 42L, entry.SeqNum)
+
+[<Fact>]
+let ``Replication.appendCommandWithSession without session info appends regular entry`` () =
+    let state = State.initLeaderState (State.init dummyConfig None)
+    let newState = Replication.appendCommandWithSession "cmd" "" 0L state
+
+    Assert.Equal(2, newState.Persistent.Log.Count)
+    let entry = Map.find 2L newState.Persistent.Log
+    Assert.Equal("cmd", entry.Command)
+    Assert.Equal(Some "", entry.ClientId)
+    Assert.Equal(Some 0L, entry.SeqNum)

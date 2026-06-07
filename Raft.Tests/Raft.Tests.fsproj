@@ -13,6 +13,7 @@
     <Compile Include="StateTests.fs" />
     <Compile Include="ElectionTests.fs" />
     <Compile Include="ReplicationTests.fs" />
+    <Compile Include="ConfigChangeTests.fs" />
     <Compile Include="SerializationTests.fs" />
     <Compile Include="IntegrationTests.fs" />
     <Compile Include="NodeTests.fs" />

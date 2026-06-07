@@ -5,6 +5,90 @@ open Raft
 open TestHelpers
 
 [<Fact>]
+let ``State.recoverConfigPhase detects JointPhase from log`` () =
+    let oldPeers = dummyConfig.Peers
+    let newPeers = [ { Id = 4; Host = ""; Port = 0 }; { Id = 5; Host = ""; Port = 0 } ]
+    let serialized = ConfigChange.serialize (JointChange(oldPeers, newPeers))
+    let command = ConfigChange.ConfigCommandPrefix + serialized
+
+    let log =
+        logFromList
+            [ { Index = 1L
+                Term = 1L
+                Command = command
+                ClientId = None
+                SeqNum = None } ]
+
+    let phase, updatedConfig = State.recoverConfigPhase log dummyConfig
+
+    match phase with
+    | JointPhase(_, np) ->
+        Assert.Equal(2, np.Length)
+        Assert.Equal(4, updatedConfig.Peers.Length)
+    | _ -> Assert.Fail "Expected JointPhase"
+
+[<Fact>]
+let ``State.recoverConfigPhase detects FinalChange from log`` () =
+    let newPeers = [ { Id = 4; Host = ""; Port = 0 }; { Id = 5; Host = ""; Port = 0 } ]
+    let serialized = ConfigChange.serialize (FinalChange newPeers)
+    let command = ConfigChange.ConfigCommandPrefix + serialized
+
+    let log =
+        logFromList
+            [ { Index = 1L
+                Term = 1L
+                Command = command
+                ClientId = None
+                SeqNum = None } ]
+
+    let phase, updatedConfig = State.recoverConfigPhase log dummyConfig
+
+    Assert.Equal(SinglePhase, phase)
+    Assert.Equal(2, updatedConfig.Peers.Length)
+    Assert.Equal(4, updatedConfig.Peers.[0].Id)
+
+[<Fact>]
+let ``State.recoverConfigPhase returns SinglePhase when no config entries in log`` () =
+    let log = logFromList []
+    let phase, updatedConfig = State.recoverConfigPhase log dummyConfig
+
+    Assert.Equal(SinglePhase, phase)
+    Assert.Equal(dummyConfig.Peers.Length, updatedConfig.Peers.Length)
+
+[<Fact>]
+let ``State.recoverConfigPhase picks latest config change from multiple entries`` () =
+    let finalPeers = [ { Id = 6; Host = ""; Port = 0 } ]
+
+    let finalCmd =
+        ConfigChange.ConfigCommandPrefix
+        + ConfigChange.serialize (FinalChange finalPeers)
+
+    let oldPeers = dummyConfig.Peers
+
+    let jointCmd =
+        ConfigChange.ConfigCommandPrefix
+        + ConfigChange.serialize (JointChange(oldPeers, [ { Id = 4; Host = ""; Port = 0 } ]))
+
+    let log =
+        logFromList
+            [ { Index = 1L
+                Term = 1L
+                Command = jointCmd
+                ClientId = None
+                SeqNum = None }
+              { Index = 2L
+                Term = 1L
+                Command = finalCmd
+                ClientId = None
+                SeqNum = None } ]
+
+    let phase, updatedConfig = State.recoverConfigPhase log dummyConfig
+
+    Assert.Equal(SinglePhase, phase)
+    Assert.Equal(1, updatedConfig.Peers.Length)
+    Assert.Equal(6, updatedConfig.Peers.[0].Id)
+
+[<Fact>]
 let ``State.init without persisted state creates default PersistentState with term 0`` () =
     let state = State.init dummyConfigStandalone None
 
@@ -206,6 +290,19 @@ let ``State.takeSnapshot trims log and stores snapshot`` () =
     Assert.Equal(3L, snapped.Volatile.LastApplied)
 
 [<Fact>]
+let ``State.updateSessionTable updates session table entry`` () =
+    let state = State.init dummyConfig None
+    Assert.True state.Persistent.SessionTable.IsEmpty
+
+    let updated = State.updateSessionTable "client-1" 5L state
+    Assert.Equal(5L, updated.Persistent.SessionTable.["client-1"])
+    Assert.Equal(1, updated.Persistent.SessionTable.Count)
+
+    let updated2 = State.updateSessionTable "client-1" 10L updated
+    Assert.Equal(10L, updated2.Persistent.SessionTable.["client-1"])
+    Assert.Equal(1, updated2.Persistent.SessionTable.Count)
+
+[<Fact>]
 let ``State.updateConfig replaces peers list`` () =
     let state = State.init dummyConfig None
     let newPeers = [ { Id = 5; Host = ""; Port = 0 }; { Id = 6; Host = ""; Port = 0 } ]
@@ -216,3 +313,94 @@ let ``State.updateConfig replaces peers list`` () =
     Assert.Equal(6, updated.Config.Peers[1].Id)
 
     Assert.Equal(2, dummyConfig.Peers.Length)
+
+[<Fact>]
+let ``State.enterJointConsensus sets JointPhase and union peers`` () =
+    let state = State.init dummyConfig None
+    Assert.Equal(SinglePhase, state.ConfigPhase)
+
+    let oldPeers = dummyConfig.Peers
+    let newPeers = [ { Id = 4; Host = ""; Port = 0 }; { Id = 5; Host = ""; Port = 0 } ]
+    let updated = State.enterJointConsensus oldPeers newPeers state
+
+    match updated.ConfigPhase with
+    | JointPhase(op, np) ->
+        Assert.Equal(2, op.Length)
+        Assert.Equal(2, np.Length)
+    | _ -> Assert.Fail "Expected JointPhase"
+
+    Assert.Equal(4, updated.Config.Peers.Length)
+
+[<Fact>]
+let ``State.exitJointConsensus sets SinglePhase and updates peers to new list`` () =
+    let oldPeers = dummyConfig.Peers
+    let newPeers = [ { Id = 4; Host = ""; Port = 0 }; { Id = 5; Host = ""; Port = 0 } ]
+
+    let state =
+        State.enterJointConsensus oldPeers newPeers (State.init dummyConfig None)
+
+    let updated = State.exitJointConsensus newPeers state
+    Assert.Equal(SinglePhase, updated.ConfigPhase)
+    Assert.Equal(2, updated.Config.Peers.Length)
+    Assert.Equal(4, updated.Config.Peers.[0].Id)
+    Assert.Equal(5, updated.Config.Peers.[1].Id)
+
+[<Fact>]
+let ``State.exitJointConsensus keeps leader when leader remains in config`` () =
+    let state = State.initLeaderState (State.init dummyConfig None)
+    Assert.Equal(Leader, state.Role)
+
+    let oldPeers = dummyConfig.Peers
+
+    let newPeers =
+        [ { Id = 1
+            Host = "127.0.0.1"
+            Port = 5001 }
+          { Id = 4; Host = ""; Port = 0 } ]
+
+    let jointState = State.enterJointConsensus oldPeers newPeers state
+    let updated = State.exitJointConsensus newPeers jointState
+
+    Assert.Equal(Leader, updated.Role)
+    Assert.Equal(SinglePhase, updated.ConfigPhase)
+    Assert.Equal(2, updated.Config.Peers.Length)
+
+[<Fact>]
+let ``State.hasQuorumJoint requires majority in both configs`` () =
+    let oldPeers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
+    let newPeers = [ { Id = 4; Host = ""; Port = 0 }; { Id = 5; Host = ""; Port = 0 } ]
+    let nodeId = 1
+
+    let allSupporters = set [ 1; 2; 3; 4; 5 ]
+    Assert.True(State.hasQuorumJoint allSupporters oldPeers newPeers nodeId)
+
+    let oldOnlySupporters = set [ 1; 2 ]
+    Assert.False(State.hasQuorumJoint oldOnlySupporters oldPeers newPeers nodeId)
+
+    let selfOnly = set [ 1 ]
+    Assert.False(State.hasQuorumJoint selfOnly oldPeers newPeers nodeId)
+
+[<Fact>]
+let ``State.hasQuorum checks majority during SinglePhase`` () =
+    let state = State.init dummyConfig None
+    Assert.Equal(SinglePhase, state.ConfigPhase)
+
+    Assert.True(State.hasQuorum (set [ 1; 2 ]) state)
+    Assert.False(State.hasQuorum (set [ 1 ]) state)
+
+[<Fact>]
+let ``State.hasQuorum checks both configs during JointPhase`` () =
+    let oldPeers = dummyConfig.Peers
+    let newPeers = [ { Id = 4; Host = ""; Port = 0 }; { Id = 5; Host = ""; Port = 0 } ]
+
+    let state =
+        State.enterJointConsensus oldPeers newPeers (State.init dummyConfig None)
+
+    match state.ConfigPhase with
+    | JointPhase _ -> ()
+    | _ -> Assert.Fail "Expected JointPhase"
+
+    Assert.False(State.hasQuorum (set [ 1; 2; 3 ]) state)
+    Assert.True(State.hasQuorum (set [ 1; 2; 3; 4 ]) state)
+    Assert.False(State.hasQuorum (set [ 1; 4; 5 ]) state)
+    Assert.True(State.hasQuorum (set [ 1; 2; 3; 4; 5 ]) state)
