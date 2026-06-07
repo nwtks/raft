@@ -57,10 +57,10 @@ let getValue (cmd: string) kvs kvsLock =
         | None -> printfn "(not found)"
 
 let submitCommand cmd (node: RaftNode) =
-    let success = node.SubmitCommand cmd
-
-    if not success then
-        printfn "Error: Not the leader. Cannot accept writes."
+    match node.SubmitCommand cmd with
+    | Accepted -> ()
+    | Redirect None -> printfn "Error: Not the leader, and current leader is unknown."
+    | Redirect(Some leader) -> printfn "Redirect: leader is Node %d at %s:%d" leader.Id leader.Host leader.Port
 
 [<TailCall>]
 let rec inputLoop node kvs kvsLock =

@@ -26,7 +26,7 @@ This file provides guidance for AI agents working in this repository.
 | `State.fs` | `PersistentState`, `VolatileState`, `LeaderState`, `RaftState`; `IPersistence` interface; pure state-transition helpers |
 | `Election.fs` | `startElection`, `createRequestVote`, `handleRequestVote`, `handleVoteResponse`; quorum promotion to Leader |
 | `Replication.fs` | `createAppendEntries`, `createHeartbeat`, `handleAppendEntries`, `handleAppendEntriesResponse`, `advanceCommitIndex`, `appendCommand` |
-| `NodeTypes.fs` | `NodeMessage` discriminated union; `ITransport` interface; `NodeContext` record (threaded through agent loop) |
+| `NodeTypes.fs` | `NodeMessage` discriminated union; `ClientCommandResult` (`Accepted` / `Redirect`); `ITransport` interface; `NodeContext` record (threaded through agent loop) |
 | `NodeTimer.fs` | Timer management: `resetElectionTimer`, `resetHeartbeatTimer`, `stopTimer`, `disposeTimer` |
 | `NodeBroadcaster.fs` | Outbound message broadcasting: `broadcastRequestVote`, `broadcastHeartbeat`, `broadcastAppendEntries`, `sendAsync` |
 | `NodeAgent.fs` | Core agent loop: `agentLoop`, `handleRaftMessage`, `handleLocalMessage`, `receiveElectionTimeout`, `receiveHeartbeatTimeout`, `applyCommitted`, `saveIfChanged` |
@@ -64,6 +64,7 @@ type NodeContext =
       Persistence: IPersistence
       OnApply: LogEntry -> unit
       OnInstallSnapshot: string -> unit
+      OnGetSnapshotData: unit -> string
       Inbox: MailboxProcessor<NodeMessage>
       State: RaftState
       ElectionTimer: Timer option

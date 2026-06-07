@@ -165,10 +165,14 @@ module NodeAgent =
                 saveIfChanged ctx state
                 NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state
                 let appliedState = applyCommitted ctx.OnApply state
-                replyChannel.Reply true
+                replyChannel.Reply Accepted
                 tryFinalizeConfiguration (autoSnapshotIfNeeded ctx appliedState)
             else
-                replyChannel.Reply false
+                let leaderInfo =
+                    ctx.State.CurrentLeader
+                    |> Option.bind (fun leaderId -> ctx.Config.Peers |> List.tryFind (fun p -> p.Id = leaderId))
+
+                replyChannel.Reply(Redirect leaderInfo)
                 ctx.State
         | AddPeer(peerInfo, replyChannel) ->
             if ctx.State.Role = Leader then

@@ -28,8 +28,9 @@ let ``RaftNode.SubmitCommand returns false when node is not Leader`` () =
         let persistence = MockPersistence()
         let node = new RaftNode(config, transport, persistence, ignore)
 
-        let success = node.SubmitCommand "put a 1"
-        Assert.False success
+        match node.SubmitCommand "put a 1" with
+        | Redirect _ -> ()
+        | Accepted -> Assert.Fail "Expected redirect"
     }
 
 [<Fact>]
@@ -61,8 +62,7 @@ let ``Leader RaftNode accepts submitted commands and applies them to state machi
         let node = new RaftNode(config, transport, persistence, onApply)
 
         node.TriggerElectionTimeout()
-        let success = node.SubmitCommand "put x 10"
-        Assert.True success
+        Assert.Equal(Accepted, node.SubmitCommand "put x 10")
 
         let finalState = node.GetState()
         Assert.Equal(2, finalState.Persistent.Log.Count)
@@ -190,8 +190,7 @@ let ``Leader RaftNode broadcasts AppendEntries on heartbeat, processes responses
         Assert.Equal(Leader, node.GetState().Role)
 
         transport.Messages.Clear()
-        let success = node.SubmitCommand "put a 42"
-        Assert.True success
+        Assert.Equal(Accepted, node.SubmitCommand "put a 42")
 
         node.GetState() |> ignore
 
@@ -432,7 +431,7 @@ let ``RaftNode.SubmitTakeSnapshot creates snapshot through actor`` () =
         node.TriggerElectionTimeout()
         Assert.Equal(Leader, (node.GetState()).Role)
 
-        node.SubmitCommand "test-command" |> Assert.True
+        Assert.Equal(Accepted, node.SubmitCommand "test-command")
 
         node.SubmitTakeSnapshot "snapshot-data"
 
@@ -471,7 +470,7 @@ let ``RaftNode.SubmitTakeSnapshot with committed entries trims log`` () =
 
         Assert.Equal(Leader, (node.GetState()).Role)
 
-        node.SubmitCommand "cmd1" |> Assert.True
+        Assert.Equal(Accepted, node.SubmitCommand "cmd1")
 
         transport.ReceiveMessage(
             AppendEntriesResponseMsg
@@ -497,7 +496,7 @@ let ``RaftNode.SubmitTakeSnapshot with committed entries trims log`` () =
         Assert.Equal(2L, s.Volatile.LastApplied)
         Assert.Equal(1, applied.Count)
 
-        node.SubmitCommand "cmd2" |> Assert.True
+        Assert.Equal(Accepted, node.SubmitCommand "cmd2")
         Assert.Equal(1, applied.Count)
 
         transport.ReceiveMessage(

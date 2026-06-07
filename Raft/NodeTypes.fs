@@ -1,11 +1,15 @@
 namespace Raft
 
+type ClientCommandResult =
+    | Accepted
+    | Redirect of leader: PeerInfo option
+
 type NodeMessage =
     | RaftRPC of RaftMessage
     | ElectionTimeout
     | HeartbeatTimeout
     | GetState of AsyncReplyChannel<RaftState>
-    | ClientCommand of command: string * AsyncReplyChannel<bool>
+    | ClientCommand of command: string * AsyncReplyChannel<ClientCommandResult>
     | TakeSnapshot of data: string * AsyncReplyChannel<unit>
     | AddPeer of PeerInfo * AsyncReplyChannel<bool>
     | RemovePeer of NodeId * AsyncReplyChannel<bool>
