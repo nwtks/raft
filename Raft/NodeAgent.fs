@@ -22,6 +22,7 @@ module NodeAgent =
                     let newPeers = System.Text.Json.JsonSerializer.Deserialize<PeerInfo list> json
                     let state2 = State.updateConfig newPeers state
                     loopApplyCommitted onApply state2 next
+            | Some entry when entry.Command = "" -> loopApplyCommitted onApply state next
             | Some entry ->
                 onApply entry
                 loopApplyCommitted onApply state next
@@ -48,6 +49,7 @@ module NodeAgent =
             let finalState =
                 if State.hasQuorum newState.VotesReceived newState then
                     let state = State.initLeaderState newState
+                    saveIfChanged ctx state
                     NodeBroadcaster.broadcastHeartbeat ctx.Config ctx.Transport state
                     state
                 else

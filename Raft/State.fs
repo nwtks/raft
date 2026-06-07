@@ -76,14 +76,15 @@ module State =
           ConfigPhase = configPhase }
 
     let initLeaderState state =
-        let nextIdx = Log.lastIndex state.Persistent.Log + 1L
+        let newLog = Log.append state.Persistent.CurrentTerm "" state.Persistent.Log
 
         let leaderState =
-            { NextIndex = state.Config.Peers |> List.map (fun p -> p.Id, nextIdx) |> Map.ofList
+            { NextIndex = state.Config.Peers |> List.map (fun p -> p.Id, 1L) |> Map.ofList
               MatchIndex = state.Config.Peers |> List.map (fun p -> p.Id, 0L) |> Map.ofList }
 
         { state with
             Role = Leader
+            Persistent = { state.Persistent with Log = newLog }
             LeaderState = Some leaderState
             CurrentLeader = Some state.Config.NodeId }
 

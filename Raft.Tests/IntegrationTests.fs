@@ -52,8 +52,8 @@ let ``3-node cluster elects a leader and commits a client command`` () =
 
     // 4. Client submits command to leader
     s1 <- Replication.appendCommand "put a 10" s1
-
-    Assert.Equal(1, s1.Persistent.Log.Count)
+    // Log contains [noop@1 (from initLeaderState), cmd@2]
+    Assert.Equal(2, s1.Persistent.Log.Count)
 
     // 5. Leader sends AppendEntries
     let ae_to2 = Replication.createAppendEntries 2 s1
@@ -66,21 +66,21 @@ let ``3-node cluster elects a leader and commits a client command`` () =
     s3 <- s3_after_ae
 
     Assert.True resp2_ae.Success
-    Assert.Equal(1, s2.Persistent.Log.Count)
+    Assert.Equal(2, s2.Persistent.Log.Count)
 
     // 7. Leader handles responses and advances commit index
     s1 <- Replication.handleAppendEntriesResponse resp2_ae s1
     s1 <- Replication.handleAppendEntriesResponse resp3_ae s1
     s1 <- Replication.advanceCommitIndex s1
 
-    Assert.Equal(1L, s1.Volatile.CommitIndex)
+    Assert.Equal(2L, s1.Volatile.CommitIndex)
 
     // 8. Leader sends Heartbeat to update follower commit index
     let hb_to2 = Replication.createHeartbeat 2 s1
     let s2_final, _ = Replication.handleAppendEntries hb_to2.Value s2
     s2 <- s2_final
 
-    Assert.Equal(1L, s2.Volatile.CommitIndex)
+    Assert.Equal(2L, s2.Volatile.CommitIndex)
 
 [<Fact>]
 let ``Leader failure triggers new election and leadership change in 3-node cluster`` () =
@@ -452,22 +452,22 @@ let ``Leader replicates commands to followers who both commit and apply`` () =
     s1 <- Election.handleVoteResponse 3 resp3 s1
     Assert.Equal(Leader, s1.Role)
 
-    // 2. Leader appends two commands
+    // 2. Leader appends two commands (noop@1 from initLeaderState, then cmd1@2, cmd2@3)
     s1 <- Replication.appendCommand "cmd1" s1
     s1 <- Replication.appendCommand "cmd2" s1
-    Assert.Equal(2, s1.Persistent.Log.Count)
+    Assert.Equal(3, s1.Persistent.Log.Count)
 
-    // 3. Replicate to Node 2 (NextIndex[2]=1, so AE sends both cmd1 and cmd2)
+    // 3. Replicate to Node 2 (NextIndex[2]=1, so AE sends noop, cmd1, cmd2)
     let ae1 = (Replication.createAppendEntries 2 s1).Value
     let r4 = Replication.handleAppendEntries ae1 s2
     s2 <- fst r4
     let resp_ae = snd r4
     Assert.True resp_ae.Success
-    Assert.Equal(2L, resp_ae.MatchIndex) // both entries matched
+    Assert.Equal(3L, resp_ae.MatchIndex) // all 3 entries matched
     s1 <- Replication.handleAppendEntriesResponse resp_ae s1
     s1 <- Replication.advanceCommitIndex s1
-    // Leader + Peer2 matched index 2 (2/3 = majority), so commit advances to 2
-    Assert.Equal(2L, s1.Volatile.CommitIndex)
+    // Leader + Peer2 matched index 3 (2/3 = majority), so commit advances to 3
+    Assert.Equal(3L, s1.Volatile.CommitIndex)
 
     // 4. Replicate to Node 3 (NextIndex[3] still 1, sends all entries)
     let ae2 = (Replication.createAppendEntries 3 s1).Value
@@ -475,19 +475,19 @@ let ``Leader replicates commands to followers who both commit and apply`` () =
     s3 <- fst r5
     let resp3_ae = snd r5
     Assert.True resp3_ae.Success
-    Assert.Equal(2L, resp3_ae.MatchIndex)
+    Assert.Equal(3L, resp3_ae.MatchIndex)
     s1 <- Replication.handleAppendEntriesResponse resp3_ae s1
     s1 <- Replication.advanceCommitIndex s1
-    // All 3 matched index 2, commit index stays at 2
-    Assert.Equal(2L, s1.Volatile.CommitIndex)
+    // All 3 matched index 3, commit index stays at 3
+    Assert.Equal(3L, s1.Volatile.CommitIndex)
 
-    // 5. Apply committed on leader
+    // 5. Apply committed on leader (noop@1 is skipped, cmd1@2 and cmd2@3 are applied)
     let applied = ResizeArray<string>()
     s1 <- NodeAgent.applyCommitted (fun e -> applied.Add e.Command) s1
     Assert.Equal(2, applied.Count)
     Assert.Contains("cmd1", applied)
     Assert.Contains("cmd2", applied)
-    Assert.Equal(2L, s1.Volatile.LastApplied)
+    Assert.Equal(3L, s1.Volatile.LastApplied)
 
     // 6. Send heartbeat to followers so they commit too
     let hb_to2 = (Replication.createHeartbeat 2 s1).Value
@@ -497,13 +497,13 @@ let ``Leader replicates commands to followers who both commit and apply`` () =
     let r7 = Replication.handleAppendEntries hb_to3 s3
     s3 <- fst r7
 
-    Assert.Equal(2L, s2.Volatile.CommitIndex)
-    Assert.Equal(2L, s3.Volatile.CommitIndex)
+    Assert.Equal(3L, s2.Volatile.CommitIndex)
+    Assert.Equal(3L, s3.Volatile.CommitIndex)
 
     s2 <- NodeAgent.applyCommitted (fun _ -> ()) s2
     s3 <- NodeAgent.applyCommitted (fun _ -> ()) s3
-    Assert.Equal(2L, s2.Volatile.LastApplied)
-    Assert.Equal(2L, s3.Volatile.LastApplied)
+    Assert.Equal(3L, s2.Volatile.LastApplied)
+    Assert.Equal(3L, s3.Volatile.LastApplied)
 
 [<Fact>]
 let ``takeSnapshot on leader trims log and snapshot is installable on follower`` () =
@@ -547,11 +547,12 @@ let ``takeSnapshot on leader trims log and snapshot is installable on follower``
         s1 <- Replication.handleAppendEntriesResponse resp_ae s1
         s1 <- Replication.advanceCommitIndex s1
 
-    Assert.Equal(3L, s1.Volatile.CommitIndex)
+    // With noop@1, the 3 commands occupy indices 2, 3, 4
+    Assert.Equal(4L, s1.Volatile.CommitIndex)
 
-    // 3. Apply committed on leader
+    // 3. Apply committed on leader (noop is skipped)
     s1 <- NodeAgent.applyCommitted (fun _ -> ()) s1
-    Assert.Equal(3L, s1.Volatile.LastApplied)
+    Assert.Equal(4L, s1.Volatile.LastApplied)
 
     // 4. Take snapshot at index 2 on leader
     s1 <- State.takeSnapshot 2L 1L "snap-data" s1

@@ -620,7 +620,7 @@ let ``Replication.appendCommand appends entry when node is Leader`` () =
     let state = State.initLeaderState (State.init dummyConfig None)
     let newState = Replication.appendCommand "put x 42" state
 
-    Assert.Equal(1, newState.Persistent.Log.Count)
-    Assert.Equal(1L, (Map.find 1L newState.Persistent.Log).Index)
-    Assert.Equal(0L, (Map.find 1L newState.Persistent.Log).Term)
-    Assert.Equal("put x 42", (Map.find 1L newState.Persistent.Log).Command)
+    Assert.Equal(2, newState.Persistent.Log.Count)
+    Assert.Equal(2L, (Map.find 2L newState.Persistent.Log).Index)
+    Assert.Equal(0L, (Map.find 2L newState.Persistent.Log).Term)
+    Assert.Equal("put x 42", (Map.find 2L newState.Persistent.Log).Command)

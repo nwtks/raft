@@ -114,8 +114,8 @@ let ``Leader RaftNode accepts submitted commands and applies them to state machi
         Assert.True success
 
         let finalState = node.GetState()
-        Assert.Equal(1, finalState.Persistent.Log.Count)
-        Assert.Equal("put x 10", (Map.find 1L finalState.Persistent.Log).Command)
+        Assert.Equal(2, finalState.Persistent.Log.Count)
+        Assert.Equal("put x 10", (Map.find 2L finalState.Persistent.Log).Command)
     }
 
 [<Fact>]
@@ -256,7 +256,7 @@ let ``Leader RaftNode broadcasts AppendEntries on heartbeat, processes responses
         let aeResp2 =
             { FollowerTerm = term
               Success = true
-              MatchIndex = 1L
+              MatchIndex = 2L
               FollowerId = 2
               ConflictTerm = 0L
               ConflictIndex = 0L }
@@ -266,7 +266,7 @@ let ``Leader RaftNode broadcasts AppendEntries on heartbeat, processes responses
         let aeResp3 =
             { FollowerTerm = term
               Success = true
-              MatchIndex = 1L
+              MatchIndex = 2L
               FollowerId = 3
               ConflictTerm = 0L
               ConflictIndex = 0L }
@@ -276,7 +276,7 @@ let ``Leader RaftNode broadcasts AppendEntries on heartbeat, processes responses
         node.GetState() |> ignore
 
         let finalState2 = node.GetState()
-        Assert.Equal(1L, finalState2.Volatile.CommitIndex)
+        Assert.Equal(2L, finalState2.Volatile.CommitIndex)
         let entry = Assert.Single applied
         Assert.Equal("put a 42", entry.Command)
 
@@ -386,8 +386,8 @@ let ``Leader RaftNode.AddPeer appends configuration entry and broadcasts to all 
         node.GetState() |> ignore
 
         let finalState = node.GetState()
-        Assert.Equal(1, finalState.Persistent.Log.Count)
-        Assert.StartsWith(ConfigChange.ConfigCommandPrefix, (Map.find 1L finalState.Persistent.Log).Command)
+        Assert.Equal(2, finalState.Persistent.Log.Count)
+        Assert.StartsWith(ConfigChange.ConfigCommandPrefix, (Map.find 2L finalState.Persistent.Log).Command)
 
         Assert.Contains(transport.Messages, fun (p, _) -> p.Id = 2)
         Assert.Contains(transport.Messages, fun (p, _) -> p.Id = 3)
@@ -429,8 +429,8 @@ let ``Leader RaftNode.RemovePeer appends configuration entry and broadcasts`` ()
         node.GetState() |> ignore
 
         let finalState = node.GetState()
-        Assert.Equal(1, finalState.Persistent.Log.Count)
-        Assert.StartsWith(ConfigChange.ConfigCommandPrefix, (Map.find 1L finalState.Persistent.Log).Command)
+        Assert.Equal(2, finalState.Persistent.Log.Count)
+        Assert.StartsWith(ConfigChange.ConfigCommandPrefix, (Map.find 2L finalState.Persistent.Log).Command)
 
         Assert.Contains(transport.Messages, fun (p, _) -> p.Id = 2)
     }
@@ -488,8 +488,8 @@ let ``RaftNode.SubmitTakeSnapshot creates snapshot through actor`` () =
         let state = node.GetState()
         Assert.True state.Persistent.Snapshot.IsSome
         Assert.Equal("snapshot-data", state.Persistent.Snapshot.Value.StateMachineData)
-        Assert.True(state.Persistent.Log.ContainsKey 1L)
-        Assert.Equal("test-command", state.Persistent.Log.[1L].Command)
+        Assert.True(state.Persistent.Log.ContainsKey 2L)
+        Assert.Equal("test-command", state.Persistent.Log.[2L].Command)
     }
 
 [<Fact>]
@@ -526,7 +526,7 @@ let ``RaftNode.SubmitTakeSnapshot with committed entries trims log`` () =
             AppendEntriesResponseMsg
                 { FollowerTerm = term
                   Success = true
-                  MatchIndex = 1L
+                  MatchIndex = 2L
                   FollowerId = 2
                   ConflictTerm = 0L
                   ConflictIndex = 0L }
@@ -536,14 +536,14 @@ let ``RaftNode.SubmitTakeSnapshot with committed entries trims log`` () =
             AppendEntriesResponseMsg
                 { FollowerTerm = term
                   Success = true
-                  MatchIndex = 1L
+                  MatchIndex = 2L
                   FollowerId = 3
                   ConflictTerm = 0L
                   ConflictIndex = 0L }
         )
 
         let s = node.GetState()
-        Assert.Equal(1L, s.Volatile.LastApplied)
+        Assert.Equal(2L, s.Volatile.LastApplied)
         Assert.Equal(1, applied.Count)
 
         node.SubmitCommand "cmd2" |> Assert.True
@@ -553,7 +553,7 @@ let ``RaftNode.SubmitTakeSnapshot with committed entries trims log`` () =
             AppendEntriesResponseMsg
                 { FollowerTerm = term
                   Success = true
-                  MatchIndex = 2L
+                  MatchIndex = 3L
                   FollowerId = 2
                   ConflictTerm = 0L
                   ConflictIndex = 0L }
@@ -563,7 +563,7 @@ let ``RaftNode.SubmitTakeSnapshot with committed entries trims log`` () =
             AppendEntriesResponseMsg
                 { FollowerTerm = term
                   Success = true
-                  MatchIndex = 2L
+                  MatchIndex = 3L
                   FollowerId = 3
                   ConflictTerm = 0L
                   ConflictIndex = 0L }
@@ -571,16 +571,17 @@ let ``RaftNode.SubmitTakeSnapshot with committed entries trims log`` () =
 
         let stateWithCommitted = node.GetState()
         Assert.Equal(2, applied.Count)
-        Assert.Equal(2L, stateWithCommitted.Volatile.LastApplied)
+        Assert.Equal(3L, stateWithCommitted.Volatile.LastApplied)
 
         node.SubmitTakeSnapshot "snap-data"
 
         let state = node.GetState()
         Assert.True state.Persistent.Snapshot.IsSome
-        Assert.Equal(2L, state.Persistent.Snapshot.Value.LastIncludedIndex)
+        Assert.Equal(3L, state.Persistent.Snapshot.Value.LastIncludedIndex)
         Assert.Equal("snap-data", state.Persistent.Snapshot.Value.StateMachineData)
 
         Assert.False(state.Persistent.Log.ContainsKey 1L)
-        Assert.True(state.Persistent.Log.ContainsKey 2L)
-        Assert.Equal("", state.Persistent.Log.[2L].Command)
+        Assert.False(state.Persistent.Log.ContainsKey 2L)
+        Assert.True(state.Persistent.Log.ContainsKey 3L)
+        Assert.Equal("", state.Persistent.Log.[3L].Command)
     }
