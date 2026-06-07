@@ -317,12 +317,17 @@ module NodeAgent =
         let oldRole = ctx.State.Role
         let newState, sendReply = handleRaftMessage ctx rpcMsg
 
+        let finalState =
+            applyCommitted ctx.OnApply newState
+            |> autoSnapshotIfNeeded ctx
+            |> tryFinalizeConfiguration
+
         let electionTimer, heartbeatTimer =
-            if oldRole <> Leader && newState.Role = Leader then
-                NodeBroadcaster.broadcastHeartbeat ctx.Config ctx.Transport newState
+            if oldRole <> Leader && finalState.Role = Leader then
+                NodeBroadcaster.broadcastHeartbeat ctx.Config ctx.Transport finalState
                 NodeTimer.stopTimer ctx.ElectionTimer
                 ctx.ElectionTimer, NodeTimer.resetHeartbeatTimer ctx
-            elif oldRole = Leader && newState.Role <> Leader then
+            elif oldRole = Leader && finalState.Role <> Leader then
                 NodeTimer.stopTimer ctx.HeartbeatTimer
                 NodeTimer.resetElectionTimer ctx, ctx.HeartbeatTimer
             elif sendReply then
@@ -330,9 +335,7 @@ module NodeAgent =
             else
                 ctx.ElectionTimer, ctx.HeartbeatTimer
 
-        let appliedState = applyCommitted ctx.OnApply newState
-        let snapshottedState = autoSnapshotIfNeeded ctx appliedState
-        tryFinalizeConfiguration snapshottedState, electionTimer, heartbeatTimer
+        finalState, electionTimer, heartbeatTimer
 
     [<TailCall>]
     let rec agentLoop ctx =
@@ -382,19 +385,30 @@ module NodeAgent =
             | ClientCommand _
             | AddPeer _
             | RemovePeer _ as localMsg ->
+                let oldRole = ctx.State.Role
                 let state = handleLocalMessage ctx localMsg
                 let remainingReads = processPendingReads ctx.PendingReads state
 
-                let ctx2 =
-                    if state.Config <> ctx.Config then
-                        { ctx with
-                            State = state
-                            Config = state.Config
-                            PendingReads = remainingReads }
+                // Handle role changes caused by applyCommitted inside handleLocalMessage
+                // (e.g., leader removes itself via FinalChange application).
+                let electionTimer, heartbeatTimer =
+                    if oldRole <> Leader && state.Role = Leader then
+                        NodeBroadcaster.broadcastHeartbeat ctx.Config ctx.Transport state
+                        NodeTimer.stopTimer ctx.ElectionTimer
+                        ctx.ElectionTimer, NodeTimer.resetHeartbeatTimer ctx
+                    elif oldRole = Leader && state.Role <> Leader then
+                        NodeTimer.stopTimer ctx.HeartbeatTimer
+                        NodeTimer.resetElectionTimer ctx, ctx.HeartbeatTimer
                     else
-                        { ctx with
-                            State = state
-                            PendingReads = remainingReads }
+                        ctx.ElectionTimer, ctx.HeartbeatTimer
+
+                let ctx2 =
+                    { ctx with
+                        State = state
+                        Config = state.Config
+                        ElectionTimer = electionTimer
+                        HeartbeatTimer = heartbeatTimer
+                        PendingReads = remainingReads }
 
                 return! agentLoop ctx2
             | LinearizableRead replyChannel ->

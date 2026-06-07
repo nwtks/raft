@@ -197,9 +197,23 @@ module State =
             Config = { state.Config with Peers = unionPeers } }
 
     let exitJointConsensus newPeers state =
-        { state with
-            ConfigPhase = SinglePhase
-            Config = { state.Config with Peers = newPeers } }
+        let newState =
+            { state with
+                ConfigPhase = SinglePhase
+                Config = { state.Config with Peers = newPeers } }
+
+        let leaderExplicitlyRemoved =
+            state.Config.Peers |> List.exists (fun p -> p.Id = state.Config.NodeId)
+            && not (newPeers |> List.exists (fun p -> p.Id = state.Config.NodeId))
+
+        if leaderExplicitlyRemoved then
+            { newState with
+                Role = Follower
+                LeaderState = None
+                CurrentLeader = None
+                VotesReceived = Set.empty }
+        else
+            newState
 
     let hasQuorum supporters state =
         match state.ConfigPhase with
