@@ -63,7 +63,7 @@ module State =
             match loadedState with
             | Some p -> p
             | None ->
-                { CurrentTerm = 0L
+                { CurrentTerm = Log.initialTerm
                   VotedFor = None
                   Log = Log.empty
                   Snapshot = None
@@ -73,7 +73,9 @@ module State =
 
         { Role = Follower
           Persistent = persistent
-          Volatile = { CommitIndex = 0L; LastApplied = 0L }
+          Volatile =
+            { CommitIndex = Log.initialLogIndex
+              LastApplied = Log.initialLogIndex }
           LeaderState = None
           VotesReceived = Set.empty
           CurrentLeader = None
@@ -82,15 +84,16 @@ module State =
           NonVotingPeers = [] }
 
     let initLeaderState state =
-        let newLog = Log.append state.Persistent.CurrentTerm "" state.Persistent.Log
+        let newLog =
+            Log.append state.Persistent.CurrentTerm Log.NoOpCommand state.Persistent.Log
 
         let allPeers =
             List.append state.Config.Peers state.NonVotingPeers
             |> List.distinctBy (fun p -> p.Id)
 
         let leaderState =
-            { NextIndex = allPeers |> List.map (fun p -> p.Id, 1L) |> Map.ofList
-              MatchIndex = allPeers |> List.map (fun p -> p.Id, 0L) |> Map.ofList }
+            { NextIndex = allPeers |> List.map (fun p -> p.Id, Log.firstLogIndex) |> Map.ofList
+              MatchIndex = allPeers |> List.map (fun p -> p.Id, Log.initialLogIndex) |> Map.ofList }
 
         { state with
             Role = Leader

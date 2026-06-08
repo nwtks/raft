@@ -5,7 +5,9 @@ module Replication =
         match state.LeaderState with
         | None -> None
         | Some ls ->
-            let nextIndex = ls.NextIndex |> Map.tryFind followerId |> Option.defaultValue 1L
+            let nextIndex =
+                ls.NextIndex |> Map.tryFind followerId |> Option.defaultValue Log.firstLogIndex
+
             let prevLogIndex = nextIndex - 1L
 
             match state.Persistent.Snapshot with
@@ -28,19 +30,19 @@ module Replication =
         createEntries (fun _ -> []) followerId state
 
     let isLogConsistent prevLogIndex prevLogTerm log =
-        prevLogIndex = 0L
+        prevLogIndex = Log.initialLogIndex
         || Log.termAt prevLogIndex log = prevLogTerm && prevLogIndex <= Log.lastIndex log
 
     let calculateConflictInfo ae log =
         if ae.PrevLogIndex > Log.lastIndex log then
-            0L, Log.lastIndex log + 1L
+            Log.initialTerm, Log.lastIndex log + 1L
         else
             let term = Log.termAt ae.PrevLogIndex log
 
             let firstIdx =
                 let mutable idx = ae.PrevLogIndex
 
-                while idx > 1L && Log.termAt (idx - 1L) log = term do
+                while idx > Log.firstLogIndex && Log.termAt (idx - 1L) log = term do
                     idx <- idx - 1L
 
                 idx
@@ -69,18 +71,18 @@ module Replication =
           Success = true
           MatchIndex = matchIdx
           FollowerId = newState.Config.NodeId
-          ConflictTerm = 0L
-          ConflictIndex = 0L }
+          ConflictTerm = Log.initialTerm
+          ConflictIndex = Log.initialLogIndex }
 
     let handleAppendEntries (ae: AppendEntries) state =
         if ae.LeaderTerm < state.Persistent.CurrentTerm then
             state,
             { FollowerTerm = state.Persistent.CurrentTerm
               Success = false
-              MatchIndex = 0L
+              MatchIndex = Log.initialLogIndex
               FollowerId = state.Config.NodeId
-              ConflictTerm = 0L
-              ConflictIndex = 0L }
+              ConflictTerm = Log.initialTerm
+              ConflictIndex = Log.initialLogIndex }
         else
             let newState = State.followLeader ae.LeaderTerm ae.LeaderId state
 
@@ -92,7 +94,7 @@ module Replication =
                 newState,
                 { FollowerTerm = newState.Persistent.CurrentTerm
                   Success = false
-                  MatchIndex = 0L
+                  MatchIndex = Log.initialLogIndex
                   FollowerId = newState.Config.NodeId
                   ConflictTerm = conflictTerm
                   ConflictIndex = conflictIndex }
@@ -107,12 +109,12 @@ module Replication =
         newNextIndex, newMatchIndex
 
     let calculateBackoffNextIndex (resp: AppendEntriesResponse) log =
-        if resp.ConflictTerm = 0L then
-            max 1L resp.ConflictIndex
+        if resp.ConflictTerm = Log.initialTerm then
+            max Log.firstLogIndex resp.ConflictIndex
         else
             match Log.lastIndexOfTerm resp.ConflictTerm log with
-            | None -> max 1L resp.ConflictIndex
-            | Some lastIdx -> max 1L lastIdx
+            | None -> max Log.firstLogIndex resp.ConflictIndex
+            | Some lastIdx -> max Log.firstLogIndex lastIdx
 
     let handleAppendEntriesResponse (resp: AppendEntriesResponse) state =
         if resp.FollowerTerm > state.Persistent.CurrentTerm then
@@ -134,7 +136,8 @@ module Replication =
     let createInstallSnapshot followerId state =
         match state.LeaderState, state.Persistent.Snapshot with
         | Some ls, Some snap ->
-            let nextIdx = ls.NextIndex |> Map.tryFind followerId |> Option.defaultValue 1L
+            let nextIdx =
+                ls.NextIndex |> Map.tryFind followerId |> Option.defaultValue Log.firstLogIndex
 
             if nextIdx <= snap.LastIncludedIndex + 1L then
                 Some
@@ -153,7 +156,7 @@ module Replication =
             { FollowerTerm = state.Persistent.CurrentTerm
               FollowerId = state.Config.NodeId
               Success = false
-              LastIncludedIndex = 0L }
+              LastIncludedIndex = Log.initialLogIndex }
         else
             let newState =
                 State.followLeader snap.LeaderTerm snap.LeaderId state

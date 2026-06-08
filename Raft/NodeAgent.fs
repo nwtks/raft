@@ -9,7 +9,7 @@ module NodeAgent =
             match msg with
             | ElectionTimeout ->
                 let state, electionTimer = NodeTimeout.receiveElectionTimeout ctx
-                let remainingReads = NodeApply.processPendingReads ctx.PendingReads state
+                let remainingReads = NodeRead.processPendingReads ctx.PendingReads state
 
                 return!
                     agentLoop
@@ -38,7 +38,7 @@ module NodeAgent =
             | ClientCommand _
             | AddPeer _
             | RemovePeer _ as localMsg -> return! agentLoop (NodeLocal.handleLocalMessageResult ctx localMsg)
-            | LinearizableRead replyChannel -> return! agentLoop (NodeApply.handleLinearizableRead ctx replyChannel)
+            | LinearizableRead replyChannel -> return! agentLoop (NodeRead.handleLinearizableRead ctx replyChannel)
             | TakeSnapshot(data, ch) ->
                 let lastApplied = ctx.State.Volatile.LastApplied
                 let lastTerm = Log.termAt lastApplied ctx.State.Persistent.Log

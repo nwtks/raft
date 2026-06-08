@@ -1,21 +1,34 @@
 namespace Raft
 
 module Log =
+    [<Literal>]
+    let NoOpCommand = ""
+
+    let initialTerm: Term = 0L
+    let initialLogIndex: LogIndex = 0L
+    let firstLogIndex: LogIndex = 1L
     let empty: Map<LogIndex, LogEntry> = Map.empty
 
     let lastIndex log =
-        if Map.isEmpty log then 0L else log |> Map.keys |> Seq.max
+        if Map.isEmpty log then
+            initialLogIndex
+        else
+            log |> Map.keys |> Seq.max
 
     let lastTerm log =
         let idx = lastIndex log
-        if idx = 0L then 0L else log.[idx].Term
+
+        if idx = initialLogIndex then
+            initialTerm
+        else
+            log.[idx].Term
 
     let getEntry index log = log |> Map.tryFind index
 
     let termAt index log =
         match getEntry index log with
         | Some entry -> entry.Term
-        | None -> 0L
+        | None -> initialTerm
 
     let lastIndexOfTerm term log =
         log
@@ -24,7 +37,11 @@ module Log =
         |> Option.map fst
 
     let entriesFrom index log =
-        log |> Map.toList |> List.skipWhile (fun (k, _) -> k < index) |> List.map snd
+        log
+        |> Map.toSeq
+        |> Seq.skipWhile (fun (k, _) -> k < index)
+        |> Seq.map snd
+        |> Seq.toList
 
     let createEntry term command clientId seqNum log =
         let nextIndex = lastIndex log + 1L
@@ -68,7 +85,7 @@ module Log =
         let sentinel =
             { Index = lastIncludedIndex
               Term = lastIncludedTerm
-              Command = ""
+              Command = NoOpCommand
               ClientId = None
               SeqNum = None }
 

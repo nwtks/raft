@@ -8,7 +8,7 @@ module NodeTimeout =
             NodeBroadcaster.broadcastRequestVote ctx.Config ctx.Transport state
 
             let finalState =
-                if State.hasQuorum state.VotesReceived state then
+                if List.isEmpty ctx.Config.Peers && State.hasQuorum state.VotesReceived state then
                     let newState = State.initLeaderState state
                     NodeUtil.saveIfChanged ctx newState
                     NodeBroadcaster.broadcastHeartbeat ctx.Config ctx.Transport newState

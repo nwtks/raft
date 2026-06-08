@@ -16,6 +16,8 @@
     <Compile Include="NodeBroadcaster.fs" />
     <Compile Include="NodeTimer.fs" />
     <Compile Include="NodeApply.fs" />
+    <Compile Include="NodeRead.fs" />
+    <Compile Include="NodeSnapshot.fs" />
     <Compile Include="NodePromotion.fs" />
     <Compile Include="NodeTimeout.fs" />
     <Compile Include="NodeRaft.fs" />

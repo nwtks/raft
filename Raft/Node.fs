@@ -38,7 +38,14 @@ type RaftNode
     do
         try
             transport.StartListener config (RaftRPC >> agent.Post) cts.Token |> ignore
-        with _ ->
+        with
+        | :? System.Net.Sockets.SocketException as ex ->
+            NodeUtil.log $"Failed to start transport listener (Socket): {ex.Message}"
+            (agent :> System.IDisposable).Dispose()
+            cts.Dispose()
+            reraise ()
+        | :? System.IO.IOException as ex ->
+            NodeUtil.log $"Failed to start transport listener (IO): {ex.Message}"
             (agent :> System.IDisposable).Dispose()
             cts.Dispose()
             reraise ()

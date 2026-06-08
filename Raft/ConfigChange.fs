@@ -5,6 +5,8 @@ type ConfigChangeData =
     | FinalChange of peers: PeerInfo list
 
 module ConfigChange =
+    let log msg = printfn "[ConfigChange] %s" msg
+
     [<Literal>]
     let ConfigCommandPrefix = "__raft_config:"
 
@@ -52,5 +54,6 @@ module ConfigChange =
             | System.Text.Json.JsonValueKind.Array -> parseArray json
             | System.Text.Json.JsonValueKind.Object -> parseTagged root
             | _ -> None
-        with _ ->
+        with :? System.Text.Json.JsonException as ex ->
+            log $"ConfigChange.parse error: {ex.Message}"
             None

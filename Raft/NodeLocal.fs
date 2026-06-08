@@ -7,7 +7,7 @@ module NodeLocal =
         let appliedState = NodeApply.applyCommitted ctx.OnApply state
         onApplied appliedState
 
-        NodePromotion.autoSnapshotIfNeeded ctx appliedState
+        NodeSnapshot.autoSnapshotIfNeeded ctx appliedState
         |> NodePromotion.tryFinalizeConfiguration
 
     let handleClientCommand ctx cmd clientId seqNum (replyChannel: AsyncReplyChannel<ClientCommandResult>) =
@@ -55,7 +55,7 @@ module NodeLocal =
                                 Some
                                     { ls with
                                         NextIndex = ls.NextIndex |> Map.add peerInfo.Id (lastIdx + 1L)
-                                        MatchIndex = ls.MatchIndex |> Map.add peerInfo.Id 0L } }
+                                        MatchIndex = ls.MatchIndex |> Map.add peerInfo.Id Log.initialLogIndex } }
                     | None -> state
 
                 NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport newState
@@ -71,7 +71,7 @@ module NodeLocal =
         let appliedState = NodeApply.applyCommitted ctx.OnApply state
         replyChannel.Reply true
 
-        NodePromotion.autoSnapshotIfNeeded ctx appliedState
+        NodeSnapshot.autoSnapshotIfNeeded ctx appliedState
         |> NodePromotion.tryFinalizeConfiguration
 
     let handleRemovePeer ctx peerId (replyChannel: AsyncReplyChannel<bool>) =
@@ -96,7 +96,7 @@ module NodeLocal =
     let handleLocalMessageResult ctx localMsg =
         let oldRole = ctx.State.Role
         let state = handleLocalMessage ctx localMsg
-        let remainingReads = NodeApply.processPendingReads ctx.PendingReads state
+        let remainingReads = NodeRead.processPendingReads ctx.PendingReads state
 
         let electionTimer, heartbeatTimer =
             if oldRole <> Leader && state.Role = Leader then

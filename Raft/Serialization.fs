@@ -18,7 +18,7 @@ type OptionConverter<'T>() =
 type OptionConverterFactory() =
     inherit System.Text.Json.Serialization.JsonConverterFactory()
 
-    override _.CanConvert(typeToConvert) =
+    override _.CanConvert typeToConvert =
         typeToConvert.IsGenericType
         && typeToConvert.GetGenericTypeDefinition() = typedefof<option<_>>
 
@@ -30,80 +30,37 @@ type OptionConverterFactory() =
 type RaftMessageConverter() =
     inherit System.Text.Json.Serialization.JsonConverter<RaftMessage>()
 
+    static let caseMap =
+        Reflection.FSharpType.GetUnionCases typeof<RaftMessage>
+        |> Array.map (fun ci -> ci.Name, ci)
+        |> Map.ofArray
+
     override _.Read(reader, typeToConvert, options) =
         use doc = System.Text.Json.JsonDocument.ParseValue(&reader)
         let root = doc.RootElement
         let caseName = root.GetProperty("Case").GetString()
         let fields = root.GetProperty "Fields"
 
-        match caseName with
-        | "RequestVoteMsg" ->
-            let payload =
-                System.Text.Json.JsonSerializer.Deserialize<RequestVote>(fields.[0].GetRawText(), options)
+        match caseMap |> Map.tryFind caseName with
+        | Some caseInfo ->
+            let fieldType = caseInfo.GetFields().[0].PropertyType
 
-            RequestVoteMsg payload
-        | "RequestVoteResponseMsg" ->
             let payload =
-                System.Text.Json.JsonSerializer.Deserialize<RequestVoteResponse>(fields.[0].GetRawText(), options)
+                System.Text.Json.JsonSerializer.Deserialize(fields.[0].GetRawText(), fieldType, options)
 
-            RequestVoteResponseMsg payload
-        | "AppendEntriesMsg" ->
-            let payload =
-                System.Text.Json.JsonSerializer.Deserialize<AppendEntries>(fields.[0].GetRawText(), options)
-
-            AppendEntriesMsg payload
-        | "AppendEntriesResponseMsg" ->
-            let payload =
-                System.Text.Json.JsonSerializer.Deserialize<AppendEntriesResponse>(fields.[0].GetRawText(), options)
-
-            AppendEntriesResponseMsg payload
-        | "InstallSnapshotMsg" ->
-            let payload =
-                System.Text.Json.JsonSerializer.Deserialize<InstallSnapshot>(fields.[0].GetRawText(), options)
-
-            InstallSnapshotMsg payload
-        | "InstallSnapshotResponseMsg" ->
-            let payload =
-                System.Text.Json.JsonSerializer.Deserialize<InstallSnapshotResponse>(fields.[0].GetRawText(), options)
-
-            InstallSnapshotResponseMsg payload
-        | _ -> failwithf "Unknown message case: %s" caseName
+            Reflection.FSharpValue.MakeUnion(caseInfo, [| payload |]) :?> RaftMessage
+        | None -> failwithf "Unknown message case: %s" caseName
 
     override _.Write(writer, value, options) =
         writer.WriteStartObject()
 
-        match value with
-        | RequestVoteMsg rv ->
-            writer.WriteString("Case", "RequestVoteMsg")
-            writer.WriteStartArray "Fields"
-            System.Text.Json.JsonSerializer.Serialize(writer, rv, options)
-            writer.WriteEndArray()
-        | RequestVoteResponseMsg rvr ->
-            writer.WriteString("Case", "RequestVoteResponseMsg")
-            writer.WriteStartArray "Fields"
-            System.Text.Json.JsonSerializer.Serialize(writer, rvr, options)
-            writer.WriteEndArray()
-        | AppendEntriesMsg ae ->
-            writer.WriteString("Case", "AppendEntriesMsg")
-            writer.WriteStartArray "Fields"
-            System.Text.Json.JsonSerializer.Serialize(writer, ae, options)
-            writer.WriteEndArray()
-        | AppendEntriesResponseMsg aer ->
-            writer.WriteString("Case", "AppendEntriesResponseMsg")
-            writer.WriteStartArray "Fields"
-            System.Text.Json.JsonSerializer.Serialize(writer, aer, options)
-            writer.WriteEndArray()
-        | InstallSnapshotMsg snap ->
-            writer.WriteString("Case", "InstallSnapshotMsg")
-            writer.WriteStartArray "Fields"
-            System.Text.Json.JsonSerializer.Serialize(writer, snap, options)
-            writer.WriteEndArray()
-        | InstallSnapshotResponseMsg snapResp ->
-            writer.WriteString("Case", "InstallSnapshotResponseMsg")
-            writer.WriteStartArray "Fields"
-            System.Text.Json.JsonSerializer.Serialize(writer, snapResp, options)
-            writer.WriteEndArray()
+        let caseInfo, fields =
+            Reflection.FSharpValue.GetUnionFields(value, typeof<RaftMessage>)
 
+        writer.WriteString("Case", caseInfo.Name)
+        writer.WriteStartArray "Fields"
+        System.Text.Json.JsonSerializer.Serialize(writer, fields.[0], options)
+        writer.WriteEndArray()
         writer.WriteEndObject()
 
 module JsonConfig =

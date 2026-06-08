@@ -4,20 +4,21 @@ module NodeUtil =
     let log msg = printfn "[Node] %s" msg
 
     let sendAsync (transport: ITransport) peer msg =
-        try
-            let task = transport.SendMessage peer msg
+        let task =
+            try
+                transport.SendMessage peer msg
+            with ex ->
+                System.Threading.Tasks.Task.FromException<unit> ex
 
-            task.ContinueWith(fun (t: System.Threading.Tasks.Task) ->
-                if t.IsFaulted then
-                    let exMsg =
-                        match t.Exception with
-                        | null -> "(unknown)"
-                        | ae -> ae.GetBaseException().Message
+        task.ContinueWith(fun (t: System.Threading.Tasks.Task) ->
+            if t.IsFaulted then
+                let exMsg =
+                    match t.Exception with
+                    | null -> "(unknown)"
+                    | ae -> ae.GetBaseException().Message
 
-                    log $"Failed to send to {peer.Id}: {exMsg}")
-            |> ignore
-        with ex ->
-            log $"Failed to send to {peer.Id}: {ex.Message}"
+                log $"Failed to send to {peer.Id}: {exMsg}")
+        |> ignore
 
     let saveIfChanged ctx state =
         if ctx.State.Persistent <> state.Persistent then

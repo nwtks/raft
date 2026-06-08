@@ -6,7 +6,20 @@ module Persistence =
     let save fileName state =
         let json = System.Text.Json.JsonSerializer.Serialize(state, JsonConfig.options)
         let tempFile = fileName + ".tmp"
-        System.IO.File.WriteAllText(tempFile, json)
+
+        use fs =
+            new System.IO.FileStream(
+                tempFile,
+                System.IO.FileMode.Create,
+                System.IO.FileAccess.Write,
+                System.IO.FileShare.None,
+                bufferSize = 4096,
+                options = System.IO.FileOptions.SequentialScan
+            )
+
+        let bytes = System.Text.Encoding.UTF8.GetBytes json
+        fs.Write(bytes, 0, bytes.Length)
+        fs.Flush true
         System.IO.File.Move(tempFile, fileName, true)
 
     let load fileName =

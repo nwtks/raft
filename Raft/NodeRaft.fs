@@ -66,7 +66,7 @@ module NodeRaft =
 
         let newState =
             NodeApply.applyCommitted ctx.OnApply state
-            |> NodePromotion.autoSnapshotIfNeeded ctx
+            |> NodeSnapshot.autoSnapshotIfNeeded ctx
             |> NodePromotion.tryFinalizeConfiguration
 
         let electionTimer, heartbeatTimer =
@@ -96,7 +96,7 @@ module NodeRaft =
                         Responses = Set.add resp.FollowerId pendingRead.Responses })
             | _ -> ctx.PendingReads
 
-        let remainingReads = NodeApply.processPendingReads updatedReads state
+        let remainingReads = NodeRead.processPendingReads updatedReads state
 
         let newCtx =
             { ctx with

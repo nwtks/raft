@@ -1,27 +1,6 @@
 namespace Raft
 
 module NodePromotion =
-    let autoSnapshotIfNeeded ctx state =
-        if ctx.Config.SnapshotAutoThreshold > 0 then
-            let lastSnapIndex =
-                match state.Persistent.Snapshot with
-                | Some snap -> snap.LastIncludedIndex
-                | None -> 0L
-
-            let logEntryCount = Log.lastIndex state.Persistent.Log - lastSnapIndex
-
-            if logEntryCount >= int64 ctx.Config.SnapshotAutoThreshold then
-                let lastApplied = state.Volatile.LastApplied
-                let lastTerm = Log.termAt lastApplied state.Persistent.Log
-                let data = ctx.OnGetSnapshotData()
-                let newState = State.takeSnapshot lastApplied lastTerm data state
-                NodeUtil.saveIfChanged ctx newState
-                newState
-            else
-                state
-        else
-            state
-
     let tryFinalizeConfiguration state =
         match state.ConfigPhase, state.Role with
         | JointPhase(_, newPeers), Leader ->
@@ -66,6 +45,6 @@ module NodePromotion =
                 NodeUtil.saveIfChanged ctx newState
                 NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport newState
                 let appliedState = NodeApply.applyCommitted ctx.OnApply newState
-                tryFinalizeConfiguration (autoSnapshotIfNeeded ctx appliedState)
+                tryFinalizeConfiguration (NodeSnapshot.autoSnapshotIfNeeded ctx appliedState)
         else
             state
