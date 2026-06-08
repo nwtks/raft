@@ -22,16 +22,25 @@ This file provides guidance for AI agents working in this repository.
 | File | Responsibility |
 |---|---|
 | `Types.fs` | Core types: `NodeId`, `Term`, `LogIndex`, `LogEntry`, `NodeRole`, all RPC message/response types, `PeerInfo`, `NodeConfig` |
-| `Log.fs` | Pure log operations: `append`, `mergeEntries` (conflict resolution), `entriesFrom`, `getEntry`, index/term lookup |
-| `State.fs` | `PersistentState`, `VolatileState`, `LeaderState`, `RaftState`; `IPersistence` interface; pure state-transition helpers |
+| `Log.fs` | Pure log operations: `append`, `appendWithSession`, `mergeEntries` (conflict resolution), `entriesFrom`, `getEntry`, `termAt`, `lastIndexOfTerm`, `trim` |
+| `ConfigChange.fs` | Cluster membership change: `ConfigChangeData` DU (`JointChange` / `FinalChange`), `serialize`, `parse`, `ConfigCommandPrefix` |
+| `State.fs` | `Snapshot`, `PersistentState`, `VolatileState`, `LeaderState`, `ConfigPhase`, `RaftState`; `IPersistence` interface; pure state-transition helpers (`init`, `initLeaderState`, `updateTerm`, `takeSnapshot`, `updateSessionTable`, `enterJointConsensus`, `exitJointConsensus`, `hasQuorum`) |
 | `Election.fs` | `startElection`, `createRequestVote`, `handleRequestVote`, `handleVoteResponse`; quorum promotion to Leader |
-| `Replication.fs` | `createAppendEntries`, `createHeartbeat`, `handleAppendEntries`, `handleAppendEntriesResponse`, `advanceCommitIndex`, `appendCommand` |
-| `NodeTypes.fs` | `NodeMessage` discriminated union; `ClientCommandResult` (`Accepted` / `Redirect`); `ITransport` interface; `NodeContext` record (threaded through agent loop) |
-| `NodeTimer.fs` | Timer management: `resetElectionTimer`, `resetHeartbeatTimer`, `stopTimer`, `disposeTimer` |
-| `NodeBroadcaster.fs` | Outbound message broadcasting: `broadcastRequestVote`, `broadcastHeartbeat`, `broadcastAppendEntries`, `sendAsync` |
-| `NodeAgent.fs` | Core agent loop: `agentLoop`, `handleRaftMessage`, `handleLocalMessage`, `receiveElectionTimeout`, `receiveHeartbeatTimeout`, `applyCommitted`, `saveIfChanged` |
-| `Node.fs` | `RaftNode` public API class: constructor, `SubmitCommand`, `GetState`, `AddPeer`, `RemovePeer`, `Dispose` |
-| `Serialization.fs` | Custom `System.Text.Json` converters: `RaftMessageConverter`, `OptionConverterFactory` |
+| `Replication.fs` | `createAppendEntries`, `createHeartbeat`, `createInstallSnapshot`, `handleAppendEntries`, `handleAppendEntriesResponse`, `handleInstallSnapshot`, `handleInstallSnapshotResponse`, `advanceCommitIndex`, `appendCommand`, `appendCommandWithSession`, `appendJointConsensus`, `appendFinalConfiguration` |
+| `NodeTypes.fs` | `NodeMessage` DU; `ClientCommandResult`, `ReadCommandResult`, `PendingRead`; `ITransport` interface; `NodeContext` record (threaded through agent loop) |
+| `NodeUtil.fs` | Shared helpers: `log`, `sendAsync` (fire-and-forget), `saveIfChanged` (flush `PersistentState` to disk when dirty) |
+| `NodeBroadcaster.fs` | Outbound message broadcasting: `broadcastRequestVote`, `broadcastHeartbeat`, `broadcastAppendEntries`, `sendAppendEntriesOrSnapshot` |
+| `NodeTimer.fs` | Timer management: `resetElectionTimer`, `resetHeartbeatTimer`, `stopTimer`, `disposeTimer`, `updateTimersOnRoleChange` |
+| `NodeApply.fs` | Entry application: `applyCommitted`, `loopApplyCommitted`, `applyConfigChangeEntry`, `applyNormalEntry` (with session de-duplication) |
+| `NodeRead.fs` | Linearizable read: `handleLinearizableRead`, `processPendingReads`, `canServePendingRead` |
+| `NodeSnapshot.fs` | Automatic log compaction: `autoSnapshotIfNeeded` (triggered by `SnapshotAutoThreshold`) |
+| `NodePromotion.fs` | Non-voting peer promotion: `tryPromoteNonVotingPeers`, `tryFinalizeConfiguration` (two-phase config change completion) |
+| `NodeTimeout.fs` | Timeout handlers: `receiveElectionTimeout`, `receiveHeartbeatTimeout` |
+| `NodeRaft.fs` | RPC dispatch: `handleRaftMessage`, `receiveRaftRPC`, `handleRaftRPCResult` |
+| `NodeLocal.fs` | Local message dispatch: `handleLocalMessage`, `handleClientCommand`, `handleAddPeer`, `handleRemovePeer`, `handleLocalMessageResult` |
+| `NodeAgent.fs` | Core agent loop: `agentLoop` (tail-recursive); routes `NodeMessage` to the handler modules above |
+| `Node.fs` | `RaftNode` public API class: constructor, `SubmitCommand`, `SubmitCommandWithSession`, `LinearizableRead`, `PostLinearizableRead`, `SubmitTakeSnapshot`, `AddPeer`, `RemovePeer`, `GetState`, `TriggerElectionTimeout`, `TriggerHeartbeatTimeout`, `Dispose` |
+| `Serialization.fs` | Custom `System.Text.Json` converters: `RaftMessageConverter`, `OptionConverter` / `OptionConverterFactory`, `JsonConfig.options` |
 | `Transport.fs` | `TcpTransport`: async TCP listener + fire-and-forget sender using JSON over raw TCP |
 | `Persistence.fs` | `FilePersistence`: atomic disk writes to `state_{id}.json` via a `.tmp` swap |
 
@@ -40,13 +49,15 @@ This file provides guidance for AI agents working in this repository.
 ```
 RaftNode (public API facade in Node.fs)
   └── MailboxProcessor<NodeMessage>  (agentLoop in NodeAgent.fs)
-        ├── handleRaftMessage     (NodeAgent.fs)   — RequestVote / AppendEntries / InstallSnapshot
-        ├── handleLocalMessage    (NodeAgent.fs)   — ClientCommand / AddPeer / RemovePeer / TakeSnapshot
-        ├── receiveElectionTimeout (NodeAgent.fs)  — startElection + broadcast
-        ├── receiveHeartbeatTimeout (NodeAgent.fs) — broadcastAppendEntries
-        ├── applyCommitted        (NodeAgent.fs)   — apply entries to state machine
-        ├── NodeBroadcaster       (NodeBroadcaster.fs) — outbound message fire-and-forget
-        └── NodeTimer             (NodeTimer.fs)   — election / heartbeat timer management
+        ├── NodeRaft       (NodeRaft.fs)       — RPC dispatch: RequestVote / AppendEntries / InstallSnapshot
+        ├── NodeLocal      (NodeLocal.fs)       — ClientCommand / AddPeer / RemovePeer
+        ├── NodeTimeout    (NodeTimeout.fs)     — ElectionTimeout / HeartbeatTimeout
+        ├── NodeRead       (NodeRead.fs)        — LinearizableRead (quorum-based read index)
+        ├── NodeApply      (NodeApply.fs)       — apply committed entries to state machine
+        ├── NodeSnapshot   (NodeSnapshot.fs)    — automatic log compaction
+        ├── NodePromotion  (NodePromotion.fs)   — non-voting peer promotion & config finalization
+        ├── NodeBroadcaster (NodeBroadcaster.fs) — outbound message fire-and-forget
+        └── NodeTimer      (NodeTimer.fs)       — election / heartbeat timer management
 ```
 
 Injected dependencies:
@@ -54,6 +65,7 @@ Injected dependencies:
 - `IPersistence` (default: `FilePersistence`) — [defined in `State.fs`, impl in `Persistence.fs`]
 - `onApply: LogEntry -> unit`  — state machine callback
 - `onInstallSnapshot: string -> unit`  — snapshot callback (called async to avoid blocking the agent loop)
+- `onGetSnapshotData: unit -> string`  — callback to obtain current state machine snapshot data
 
 Internally, the agent loop threads a `NodeContext` record (defined in `NodeTypes.fs`) through each step:
 
@@ -67,9 +79,10 @@ type NodeContext =
       OnGetSnapshotData: unit -> string
       Inbox: MailboxProcessor<NodeMessage>
       State: RaftState
-      ElectionTimer: Timer option
-      HeartbeatTimer: Timer option
-      CancellationTokenSource: CancellationTokenSource }
+      ElectionTimer: System.Threading.Timer option
+      HeartbeatTimer: System.Threading.Timer option
+      CancellationTokenSource: System.Threading.CancellationTokenSource
+      PendingReads: PendingRead list }
 ```
 
 State is **immutable**. Every handler returns a new `RaftState`; the agent loop threads it through via tail-recursive `agentLoop`. Never mutate `RaftState` directly.
@@ -95,15 +108,24 @@ TCP connection timeout for outbound messages is **3 000 ms** (hardcoded in `Tran
 
 | File | Coverage area |
 |---|---|
+| `TestHelpers.fs` | Shared test utilities: `MockTransport`, `MockPersistence`, config helpers |
 | `LogTests.fs` | `Log` module — pure log operations |
 | `StateTests.fs` | `State` module — init and state transitions |
 | `ElectionTests.fs` | `Election` module — vote granting, quorum, term updates |
 | `ReplicationTests.fs` | `Replication` module — AppendEntries, commit index |
+| `ConfigChangeTests.fs` | `ConfigChange` module — serialize/parse for `JointChange` / `FinalChange` |
+| `SerializationTests.fs` | `RaftMessageConverter` / `OptionConverter` — JSON round-trips |
 | `IntegrationTests.fs` | Multi-step pure-function scenarios (no TCP, no actors) |
+| `NodeReadTests.fs` | `NodeRead` module — linearizable read logic |
+| `NodeSnapshotTests.fs` | `NodeSnapshot` module — automatic log compaction |
+| `NodeApplyTests.fs` | `NodeApply` module — entry application with session de-duplication |
+| `NodePromotionTests.fs` | `NodePromotion` module — non-voting peer promotion |
+| `NodeBroadcasterTests.fs` | `NodeBroadcaster` module — message broadcasting |
+| `NodeLocalTests.fs` | `NodeLocal` module — local message dispatch |
+| `NodeRaftTests.fs` | `NodeRaft` module — RPC dispatch |
 | `NodeTests.fs` | `RaftNode` actor behaviour using `MockTransport` / `MockPersistence` |
 | `TransportTests.fs` | `TcpTransport` — real loopback TCP send/receive |
 | `PersistenceTests.fs` | `FilePersistence` — save/load round-trip and overwrite |
-| `SerializationTests.fs` | `RaftMessageConverter` / `OptionConverter` — JSON round-trips |
 
 **`IntegrationTests.fs`** exercises end-to-end Raft scenarios (leader election, log replication, log inconsistency recovery, split-brain, stale leader rejection) by calling the pure `Election`, `Replication`, and `State` module functions directly — **no TCP sockets, no `RaftNode` actor, no real timers**. These tests are fast and deterministic.
 
@@ -115,6 +137,5 @@ Maintain high unit test coverage (target: ≥ 80% line coverage).
 
 - All algorithm logic goes in `Raft/` (pure functions where possible, no I/O side effects).
 - Side-effecting concerns (network, disk) are hidden behind `ITransport` / `IPersistence` interfaces and injected at the `RaftNode` constructor — keep them mockable.
-- Prefer `async {}` computation expressions for async work inside the actor; use `task {}` for the transport layer (interop with .NET `Task`-based APIs).
 - Use `[<TailCall>]` on recursive functions (`agentLoop`, `Log._merge`, `inputLoop` in App) to prevent stack overflows.
 - Do not introduce new external NuGet packages without checking existing dependencies in the `.fsproj` files first.
