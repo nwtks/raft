@@ -10,21 +10,22 @@ module NodeRead =
     let processPendingReads pendingReads state =
         pendingReads
         |> List.filter (fun pendingRead ->
-            if state.Role <> Leader then
+            if state.Role = Leader then
+                if
+                    canServePendingRead state pendingRead
+                    && state.Volatile.LastApplied >= pendingRead.ReadIndex
+                then
+                    pendingRead.ReplyChannel.Reply ReadReady
+                    false
+                else
+                    true
+            else
                 let leaderInfo =
                     state.CurrentLeader
                     |> Option.bind (fun leaderId -> state.Config.Peers |> List.tryFind (fun p -> p.Id = leaderId))
 
                 pendingRead.ReplyChannel.Reply(ReadRedirect leaderInfo)
-                false
-            elif
-                canServePendingRead state pendingRead
-                && state.Volatile.LastApplied >= pendingRead.ReadIndex
-            then
-                pendingRead.ReplyChannel.Reply ReadReady
-                false
-            else
-                true)
+                false)
 
     let handleLinearizableRead ctx (replyChannel: AsyncReplyChannel<ReadCommandResult>) =
         if ctx.State.Role = Leader then

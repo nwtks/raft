@@ -16,6 +16,13 @@
     <Compile Include="ConfigChangeTests.fs" />
     <Compile Include="SerializationTests.fs" />
     <Compile Include="IntegrationTests.fs" />
+    <Compile Include="NodeReadTests.fs" />
+    <Compile Include="NodeSnapshotTests.fs" />
+    <Compile Include="NodeApplyTests.fs" />
+    <Compile Include="NodePromotionTests.fs" />
+    <Compile Include="NodeBroadcasterTests.fs" />
+    <Compile Include="NodeLocalTests.fs" />
+    <Compile Include="NodeRaftTests.fs" />
     <Compile Include="NodeTests.fs" />
     <Compile Include="TransportTests.fs" />
     <Compile Include="PersistenceTests.fs" />

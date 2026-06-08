@@ -52,7 +52,7 @@ module NodeApply =
             | Some entry ->
                 let newState = applyNormalEntry onApply entry state
                 loopApplyCommitted onApply newState next
-            | None -> loopApplyCommitted onApply state (next + 1L)
+            | None -> loopApplyCommitted onApply state next
         else
             state, lastApplied
 

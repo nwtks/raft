@@ -70,17 +70,7 @@ module NodeRaft =
             |> NodePromotion.tryFinalizeConfiguration
 
         let electionTimer, heartbeatTimer =
-            if oldRole <> Leader && newState.Role = Leader then
-                NodeBroadcaster.broadcastHeartbeat ctx.Config ctx.Transport newState
-                NodeTimer.stopTimer ctx.ElectionTimer
-                ctx.ElectionTimer, NodeTimer.resetHeartbeatTimer ctx
-            elif oldRole = Leader && newState.Role <> Leader then
-                NodeTimer.stopTimer ctx.HeartbeatTimer
-                NodeTimer.resetElectionTimer ctx, ctx.HeartbeatTimer
-            elif sendReply then
-                NodeTimer.resetElectionTimer ctx, ctx.HeartbeatTimer
-            else
-                ctx.ElectionTimer, ctx.HeartbeatTimer
+            NodeTimer.updateTimersOnRoleChange ctx oldRole newState sendReply
 
         newState, electionTimer, heartbeatTimer
 

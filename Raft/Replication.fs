@@ -173,7 +173,6 @@ module Replication =
             State.updateTerm resp.FollowerTerm state
         else
             match state.LeaderState with
-            | None -> state
             | Some ls ->
                 if resp.Success then
                     let newMatchIndex = ls.MatchIndex |> Map.add resp.FollowerId resp.LastIncludedIndex
@@ -184,6 +183,7 @@ module Replication =
                     State.updateLeaderState newNextIndex newMatchIndex state
                 else
                     state
+            | None -> state
 
     let canCommitIndex state leaderState index =
         let supporters =
@@ -200,7 +200,6 @@ module Replication =
 
     let advanceCommitIndex state =
         match state.LeaderState with
-        | None -> state
         | Some ls ->
             let lastIdx = Log.lastIndex state.Persistent.Log
 
@@ -210,40 +209,41 @@ module Replication =
                 |> Option.defaultValue state.Volatile.CommitIndex
 
             State.updateCommitIndex newCommitIndex state
+        | None -> state
 
     let appendJointConsensus oldPeers newPeers state =
-        if state.Role <> Leader then
-            state
-        else
+        if state.Role = Leader then
             let command =
                 ConfigChange.ConfigCommandPrefix
                 + ConfigChange.serialize (JointChange(oldPeers, newPeers))
 
             let newLog = Log.append state.Persistent.CurrentTerm command state.Persistent.Log
             State.updateLog newLog state
+        else
+            state
 
     let appendFinalConfiguration peers state =
-        if state.Role <> Leader then
-            state
-        else
+        if state.Role = Leader then
             let command =
                 ConfigChange.ConfigCommandPrefix + ConfigChange.serialize (FinalChange peers)
 
             let newLog = Log.append state.Persistent.CurrentTerm command state.Persistent.Log
             State.updateLog newLog state
+        else
+            state
 
     let appendCommand command state =
-        if state.Role <> Leader then
-            state
-        else
+        if state.Role = Leader then
             let newLog = Log.append state.Persistent.CurrentTerm command state.Persistent.Log
             State.updateLog newLog state
+        else
+            state
 
     let appendCommandWithSession command clientId seqNum state =
-        if state.Role <> Leader then
-            state
-        else
+        if state.Role = Leader then
             let newLog =
                 Log.appendWithSession state.Persistent.CurrentTerm command clientId seqNum state.Persistent.Log
 
             State.updateLog newLog state
+        else
+            state

@@ -4,13 +4,6 @@ open Xunit
 open Raft
 open TestHelpers
 
-let createEntry index term cmd =
-    { Index = index
-      Term = term
-      Command = cmd
-      ClientId = None
-      SeqNum = None }
-
 [<Fact>]
 let ``Log.empty returns lastIndex 0 and lastTerm 0`` () =
     let log = Log.empty
@@ -196,7 +189,7 @@ let ``Log.trim removes entries at or below lastIncludedIndex and adds sentinel``
     Assert.Equal(3, trimmed.Count)
 
     Assert.True(trimmed.ContainsKey 2L)
-    Assert.Equal("", trimmed.[2L].Command)
+    Assert.Equal(Log.NoOpCommand, trimmed.[2L].Command)
     Assert.Equal(1L, trimmed.[2L].Term)
 
     Assert.True(trimmed.ContainsKey 3L)
@@ -211,4 +204,4 @@ let ``Log.trim with empty log adds only sentinel`` () =
     let trimmed = Log.trim 1L 1L Map.empty
     Assert.Equal(1, trimmed.Count)
     Assert.Equal(1L, trimmed.[1L].Index)
-    Assert.Equal("", trimmed.[1L].Command)
+    Assert.Equal(Log.NoOpCommand, trimmed.[1L].Command)

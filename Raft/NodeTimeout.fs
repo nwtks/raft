@@ -2,7 +2,9 @@ namespace Raft
 
 module NodeTimeout =
     let receiveElectionTimeout ctx =
-        if ctx.State.Role <> Leader then
+        if ctx.State.Role = Leader then
+            ctx.State, ctx.ElectionTimer
+        else
             let state = Election.startElection ctx.State
             NodeUtil.saveIfChanged ctx state
             NodeBroadcaster.broadcastRequestVote ctx.Config ctx.Transport state
@@ -17,8 +19,6 @@ module NodeTimeout =
                     state
 
             finalState, NodeTimer.resetElectionTimer ctx
-        else
-            ctx.State, ctx.ElectionTimer
 
     let receiveHeartbeatTimeout ctx =
         if ctx.State.Role = Leader then

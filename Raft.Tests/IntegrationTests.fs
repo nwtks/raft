@@ -7,29 +7,10 @@ open TestHelpers
 // Simulate simple cluster by directly passing messages (no TCP).
 [<Fact>]
 let ``3-node cluster elects a leader and commits a client command`` () =
-    let config1 =
-        { NodeId = 1
-          Host = ""
-          Port = 0
-          Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
-          ElectionTimeoutMinMs = 1
-          ElectionTimeoutMaxMs = 2
-          HeartbeatIntervalMs = 1
-          SnapshotAutoThreshold = 0 }
-
-    let config2 =
-        { config1 with
-            NodeId = 2
-            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ] }
-
-    let config3 =
-        { config1 with
-            NodeId = 3
-            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 2; Host = ""; Port = 0 } ] }
-
-    let mutable s1 = State.init config1 None
-    let mutable s2 = State.init config2 None
-    let mutable s3 = State.init config3 None
+    let c1, c2, c3 = threeNodeConfigs ()
+    let mutable s1 = State.init c1 None
+    let mutable s2 = State.init c2 None
+    let mutable s3 = State.init c3 None
 
     // 1. Node 1 times out and starts election
     s1 <- Election.startElection s1
@@ -85,41 +66,16 @@ let ``3-node cluster elects a leader and commits a client command`` () =
 
 [<Fact>]
 let ``Leader failure triggers new election and leadership change in 3-node cluster`` () =
-    let config1 =
-        { NodeId = 1
-          Host = ""
-          Port = 0
-          Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
-          ElectionTimeoutMinMs = 1
-          ElectionTimeoutMaxMs = 2
-          HeartbeatIntervalMs = 1
-          SnapshotAutoThreshold = 0 }
-
-    let config2 =
-        { config1 with
-            NodeId = 2
-            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ] }
-
-    let config3 =
-        { config1 with
-            NodeId = 3
-            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 2; Host = ""; Port = 0 } ] }
-
-    let mutable s1 = State.init config1 None
-    let mutable s2 = State.init config2 None
-    let mutable s3 = State.init config3 None
+    let c1, c2, c3 = threeNodeConfigs ()
+    let mutable s1 = State.init c1 None
+    let mutable s2 = State.init c2 None
+    let mutable s3 = State.init c3 None
 
     // 1. Initial election: Node 1 becomes leader
-    s1 <- Election.startElection s1
-    let rv1 = Election.createRequestVote s1
-
-    let s2_new, resp2 = Election.handleRequestVote rv1 s2
+    let s1_new, s2_new, s3_new, _ = electLeader s1 s2 s3
+    s1 <- s1_new
     s2 <- s2_new
-    let s3_new, resp3 = Election.handleRequestVote rv1 s3
     s3 <- s3_new
-
-    s1 <- Election.handleVoteResponse 2 resp2 s1
-    s1 <- Election.handleVoteResponse 3 resp3 s1
 
     Assert.Equal(Leader, s1.Role)
     Assert.Equal(1L, s1.Persistent.CurrentTerm)
@@ -170,29 +126,10 @@ let ``Leader failure triggers new election and leadership change in 3-node clust
 
 [<Fact>]
 let ``Concurrent candidacy resolves with one leader in 3-node cluster`` () =
-    let config1 =
-        { NodeId = 1
-          Host = ""
-          Port = 0
-          Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
-          ElectionTimeoutMinMs = 1
-          ElectionTimeoutMaxMs = 2
-          HeartbeatIntervalMs = 1
-          SnapshotAutoThreshold = 0 }
-
-    let config2 =
-        { config1 with
-            NodeId = 2
-            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ] }
-
-    let config3 =
-        { config1 with
-            NodeId = 3
-            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 2; Host = ""; Port = 0 } ] }
-
-    let mutable s1 = State.init config1 None
-    let mutable s2 = State.init config2 None
-    let mutable s3 = State.init config3 None
+    let c1, c2, c3 = threeNodeConfigs ()
+    let mutable s1 = State.init c1 None
+    let mutable s2 = State.init c2 None
+    let mutable s3 = State.init c3 None
 
     // 1. Node 1 and Node 2 both start election for Term 1
     s1 <- Election.startElection s1
@@ -238,32 +175,12 @@ let ``Concurrent candidacy resolves with one leader in 3-node cluster`` () =
 
 [<Fact>]
 let ``Stale leader AppendEntries is rejected and stale leader steps down to Follower`` () =
-    // Reuse basic config
-    let config1 =
-        { NodeId = 1
-          Host = ""
-          Port = 0
-          Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
-          ElectionTimeoutMinMs = 1
-          ElectionTimeoutMaxMs = 2
-          HeartbeatIntervalMs = 1
-          SnapshotAutoThreshold = 0 }
+    let c1, c2, c3 = threeNodeConfigs ()
+    let mutable s1 = State.init c1 None
+    let mutable s2 = State.init c2 None
+    let mutable s3 = State.init c3 None
 
-    let config2 =
-        { config1 with
-            NodeId = 2
-            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ] }
-
-    let config3 =
-        { config1 with
-            NodeId = 3
-            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 2; Host = ""; Port = 0 } ] }
-
-    let mutable s1 = State.init config1 None
-    let mutable s2 = State.init config2 None
-    let mutable s3 = State.init config3 None
-
-    // 1. Node 1 becomes Leader of Term 1
+    // 1. Node 1 becomes Leader of Term 1 (only Node 2 responds; Node 3 is simulated as partitioned later)
     s1 <- Election.startElection s1
     let rv1 = Election.createRequestVote s1
     let s2_new, resp2 = Election.handleRequestVote rv1 s2
@@ -437,41 +354,16 @@ let ``Leader resolves log inconsistency by decrementing NextIndex and retrying A
 
 [<Fact>]
 let ``Leader replicates commands to followers who both commit and apply`` () =
-    let config1 =
-        { NodeId = 1
-          Host = ""
-          Port = 0
-          Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
-          ElectionTimeoutMinMs = 1
-          ElectionTimeoutMaxMs = 2
-          HeartbeatIntervalMs = 1
-          SnapshotAutoThreshold = 0 }
-
-    let config2 =
-        { config1 with
-            NodeId = 2
-            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ] }
-
-    let config3 =
-        { config1 with
-            NodeId = 3
-            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 2; Host = ""; Port = 0 } ] }
-
-    let mutable s1 = State.init config1 None
-    let mutable s2 = State.init config2 None
-    let mutable s3 = State.init config3 None
+    let c1, c2, c3 = threeNodeConfigs ()
+    let mutable s1 = State.init c1 None
+    let mutable s2 = State.init c2 None
+    let mutable s3 = State.init c3 None
 
     // 1. Node 1 becomes leader of Term 1
-    s1 <- Election.startElection s1
-    let rv1 = Election.createRequestVote s1
-    let r2 = Election.handleRequestVote rv1 s2
-    s2 <- fst r2
-    let resp2 = snd r2
-    let r3 = Election.handleRequestVote rv1 s3
-    s3 <- fst r3
-    let resp3 = snd r3
-    s1 <- Election.handleVoteResponse 2 resp2 s1
-    s1 <- Election.handleVoteResponse 3 resp3 s1
+    let s1_new, s2_new, s3_new, _ = electLeader s1 s2 s3
+    s1 <- s1_new
+    s2 <- s2_new
+    s3 <- s3_new
     Assert.Equal(Leader, s1.Role)
 
     // 2. Leader appends two commands (noop@1 from initLeaderState, then cmd1@2, cmd2@3)
@@ -605,7 +497,7 @@ let ``takeSnapshot on leader trims log and snapshot is installable on follower``
     Assert.True s2.Persistent.Snapshot.IsSome
     Assert.Equal("snap-data", s2.Persistent.Snapshot.Value.StateMachineData)
     Assert.False(s2.Persistent.Log.ContainsKey 1L)
-    Assert.Equal("", s2.Persistent.Log.[2L].Command) // sentinel
+    Assert.Equal(Log.NoOpCommand, s2.Persistent.Log.[2L].Command) // sentinel
 
     // 6. Leader handles the response
     let s1_after_snapResp = Replication.handleInstallSnapshotResponse snapResp s1
@@ -664,39 +556,16 @@ let ``createAppendEntries returns None when leader has no LeaderState`` () =
 
 [<Fact>]
 let ``Session-based duplicate detection prevents duplicate application in integration`` () =
-    let config1 =
-        { NodeId = 1
-          Host = ""
-          Port = 0
-          Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
-          ElectionTimeoutMinMs = 1
-          ElectionTimeoutMaxMs = 2
-          HeartbeatIntervalMs = 1
-          SnapshotAutoThreshold = 0 }
-
-    let config2 =
-        { config1 with
-            NodeId = 2
-            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ] }
-
-    let config3 =
-        { config1 with
-            NodeId = 3
-            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 2; Host = ""; Port = 0 } ] }
-
-    let mutable s1 = State.init config1 None
-    let mutable s2 = State.init config2 None
-    let mutable s3 = State.init config3 None
+    let c1, c2, c3 = threeNodeConfigs ()
+    let mutable s1 = State.init c1 None
+    let mutable s2 = State.init c2 None
+    let mutable s3 = State.init c3 None
 
     // 1. Node 1 becomes leader of Term 1
-    s1 <- Election.startElection s1
-    let rv1 = Election.createRequestVote s1
-    let rv1_s2, resp2 = Election.handleRequestVote rv1 s2
-    s2 <- rv1_s2
-    let rv1_s3, resp3 = Election.handleRequestVote rv1 s3
-    s3 <- rv1_s3
-    s1 <- Election.handleVoteResponse 2 resp2 s1
-    s1 <- Election.handleVoteResponse 3 resp3 s1
+    let s1_new, s2_new, s3_new, _ = electLeader s1 s2 s3
+    s1 <- s1_new
+    s2 <- s2_new
+    s3 <- s3_new
     Assert.Equal(Leader, s1.Role)
 
     // 2. Submit a command with session info
@@ -731,43 +600,20 @@ let ``Session-based duplicate detection prevents duplicate application in integr
 
 [<Fact>]
 let ``JointConsensus config change replicates and commits on followers`` () =
-    let config1 =
-        { NodeId = 1
-          Host = ""
-          Port = 0
-          Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
-          ElectionTimeoutMinMs = 1
-          ElectionTimeoutMaxMs = 2
-          HeartbeatIntervalMs = 1
-          SnapshotAutoThreshold = 0 }
-
-    let config2 =
-        { config1 with
-            NodeId = 2
-            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ] }
-
-    let config3 =
-        { config1 with
-            NodeId = 3
-            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 2; Host = ""; Port = 0 } ] }
-
-    let mutable s1 = State.init config1 None
-    let mutable s2 = State.init config2 None
-    let mutable s3 = State.init config3 None
+    let c1, c2, c3 = threeNodeConfigs ()
+    let mutable s1 = State.init c1 None
+    let mutable s2 = State.init c2 None
+    let mutable s3 = State.init c3 None
 
     // 1. Node 1 becomes leader of Term 1
-    s1 <- Election.startElection s1
-    let rv1 = Election.createRequestVote s1
-    let rv1_s2, resp2 = Election.handleRequestVote rv1 s2
-    s2 <- rv1_s2
-    let rv1_s3, resp3 = Election.handleRequestVote rv1 s3
-    s3 <- rv1_s3
-    s1 <- Election.handleVoteResponse 2 resp2 s1
-    s1 <- Election.handleVoteResponse 3 resp3 s1
+    let s1_new, s2_new, s3_new, _ = electLeader s1 s2 s3
+    s1 <- s1_new
+    s2 <- s2_new
+    s3 <- s3_new
     Assert.Equal(Leader, s1.Role)
 
     // 2. Append JointConsensus entry on leader
-    let oldPeers = config1.Peers
+    let oldPeers = c1.Peers
     let newPeers = [ { Id = 4; Host = ""; Port = 0 }; { Id = 5; Host = ""; Port = 0 } ]
     s1 <- Replication.appendJointConsensus oldPeers newPeers s1
     Assert.Equal(2, s1.Persistent.Log.Count)
@@ -820,43 +666,20 @@ let ``JointConsensus config change replicates and commits on followers`` () =
 [<Fact>]
 let ``FinalConfiguration entry transitions from JointPhase to SinglePhase via applyCommitted`` () =
     // Use a 3-node cluster so quorum is achievable in both configs during JointPhase
-    let config1 =
-        { NodeId = 1
-          Host = ""
-          Port = 0
-          Peers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
-          ElectionTimeoutMinMs = 1
-          ElectionTimeoutMaxMs = 2
-          HeartbeatIntervalMs = 1
-          SnapshotAutoThreshold = 0 }
-
-    let config2 =
-        { config1 with
-            NodeId = 2
-            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ] }
-
-    let config3 =
-        { config1 with
-            NodeId = 3
-            Peers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 2; Host = ""; Port = 0 } ] }
-
-    let mutable s1 = State.init config1 None
-    let mutable s2 = State.init config2 None
-    let mutable s3 = State.init config3 None
+    let c1, c2, c3 = threeNodeConfigs ()
+    let mutable s1 = State.init c1 None
+    let mutable s2 = State.init c2 None
+    let mutable s3 = State.init c3 None
 
     // 1. Node 1 becomes leader of Term 1
-    s1 <- Election.startElection s1
-    let rv1 = Election.createRequestVote s1
-    let rv1_s2, resp2 = Election.handleRequestVote rv1 s2
-    s2 <- rv1_s2
-    let rv1_s3, resp3 = Election.handleRequestVote rv1 s3
-    s3 <- rv1_s3
-    s1 <- Election.handleVoteResponse 2 resp2 s1
-    s1 <- Election.handleVoteResponse 3 resp3 s1
+    let s1_new, s2_new, s3_new, _ = electLeader s1 s2 s3
+    s1 <- s1_new
+    s2 <- s2_new
+    s3 <- s3_new
     Assert.Equal(Leader, s1.Role)
 
     // 2. Manually enter JointPhase (simulating that JointChange was committed)
-    let oldPeers = config1.Peers
+    let oldPeers = s1.Config.Peers
     // New config includes existing nodes so quorum can be reached
     let newPeers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 2; Host = ""; Port = 0 } ]
     s1 <- State.enterJointConsensus oldPeers newPeers s1
@@ -920,7 +743,7 @@ let ``applyCommitted skips noop entries and only applies real commands`` () =
     s1 <- Election.handleVoteResponse 2 resp2 s1
     Assert.Equal(Leader, s1.Role)
     Assert.Equal(1, s1.Persistent.Log.Count)
-    Assert.Equal("", (Map.find 1L s1.Persistent.Log).Command) // noop
+    Assert.Equal(Log.NoOpCommand, (Map.find 1L s1.Persistent.Log).Command) // noop
 
     // 2. Append a real command
     s1 <- Replication.appendCommand "real-cmd" s1

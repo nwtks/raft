@@ -65,15 +65,6 @@ module NodeLocal =
             replyChannel.Reply false
             ctx.State
 
-    let commitAndBroadcastBool (ctx: NodeContext) state (replyChannel: AsyncReplyChannel<bool>) =
-        NodeUtil.saveIfChanged ctx state
-        NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state
-        let appliedState = NodeApply.applyCommitted ctx.OnApply state
-        replyChannel.Reply true
-
-        NodeSnapshot.autoSnapshotIfNeeded ctx appliedState
-        |> NodePromotion.tryFinalizeConfiguration
-
     let handleRemovePeer ctx peerId (replyChannel: AsyncReplyChannel<bool>) =
         if ctx.State.Role = Leader then
             let oldPeers = ctx.State.Config.Peers
@@ -99,15 +90,7 @@ module NodeLocal =
         let remainingReads = NodeRead.processPendingReads ctx.PendingReads state
 
         let electionTimer, heartbeatTimer =
-            if oldRole <> Leader && state.Role = Leader then
-                NodeBroadcaster.broadcastHeartbeat ctx.Config ctx.Transport state
-                NodeTimer.stopTimer ctx.ElectionTimer
-                ctx.ElectionTimer, NodeTimer.resetHeartbeatTimer ctx
-            elif oldRole = Leader && state.Role <> Leader then
-                NodeTimer.stopTimer ctx.HeartbeatTimer
-                NodeTimer.resetElectionTimer ctx, ctx.HeartbeatTimer
-            else
-                ctx.ElectionTimer, ctx.HeartbeatTimer
+            NodeTimer.updateTimersOnRoleChange ctx oldRole state false
 
         { ctx with
             State = state

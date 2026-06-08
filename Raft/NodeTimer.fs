@@ -33,3 +33,16 @@ module NodeTimer =
 
     let resetHeartbeatTimer ctx =
         resetTimer ctx.Inbox ctx.HeartbeatTimer HeartbeatTimeout ctx.Config.HeartbeatIntervalMs
+
+    let updateTimersOnRoleChange ctx oldRole newState sendReply =
+        if oldRole <> Leader && newState.Role = Leader then
+            NodeBroadcaster.broadcastHeartbeat ctx.Config ctx.Transport newState
+            stopTimer ctx.ElectionTimer
+            ctx.ElectionTimer, resetHeartbeatTimer ctx
+        elif oldRole = Leader && newState.Role <> Leader then
+            stopTimer ctx.HeartbeatTimer
+            resetElectionTimer ctx, ctx.HeartbeatTimer
+        elif sendReply then
+            resetElectionTimer ctx, ctx.HeartbeatTimer
+        else
+            ctx.ElectionTimer, ctx.HeartbeatTimer

@@ -278,7 +278,7 @@ let ``State.takeSnapshot trims log and stores snapshot`` () =
     Assert.Equal(2, snapped.Persistent.Log.Count)
     Assert.True(snapped.Persistent.Log.ContainsKey 2L)
     Assert.True(snapped.Persistent.Log.ContainsKey 3L)
-    Assert.Equal("", snapped.Persistent.Log.[2L].Command)
+    Assert.Equal(Log.NoOpCommand, snapped.Persistent.Log.[2L].Command)
     Assert.Equal("c", snapped.Persistent.Log.[3L].Command)
 
     Assert.True snapped.Persistent.Snapshot.IsSome
@@ -288,6 +288,36 @@ let ``State.takeSnapshot trims log and stores snapshot`` () =
 
     Assert.Equal(3L, snapped.Volatile.CommitIndex)
     Assert.Equal(3L, snapped.Volatile.LastApplied)
+
+[<Fact>]
+let ``State.takeSnapshot at index 1 trims log and adds sentinel`` () =
+    let baseState = State.init dummyConfig None
+    let log = logFromList [ createEntry 1L 1L "a"; createEntry 2L 1L "b" ]
+
+    let state =
+        { baseState with
+            Persistent = { baseState.Persistent with Log = log } }
+
+    let snapped = State.takeSnapshot 1L 1L "snap" state
+    Assert.Equal(2, snapped.Persistent.Log.Count)
+    Assert.True(snapped.Persistent.Log.ContainsKey 1L)
+    Assert.Equal(Log.NoOpCommand, snapped.Persistent.Log.[1L].Command)
+    Assert.True(snapped.Persistent.Log.ContainsKey 2L)
+    Assert.Equal("b", snapped.Persistent.Log.[2L].Command)
+
+[<Fact>]
+let ``State.takeSnapshot at last index trims all entries`` () =
+    let baseState = State.init dummyConfig None
+    let log = logFromList [ createEntry 1L 1L "a"; createEntry 2L 1L "b" ]
+
+    let state =
+        { baseState with
+            Persistent = { baseState.Persistent with Log = log } }
+
+    let snapped = State.takeSnapshot 2L 1L "snap" state
+    Assert.Equal(1, snapped.Persistent.Log.Count)
+    Assert.Equal(Log.NoOpCommand, snapped.Persistent.Log.[2L].Command)
+    Assert.False(snapped.Persistent.Log.ContainsKey 1L)
 
 [<Fact>]
 let ``State.updateSessionTable updates session table entry`` () =
@@ -364,6 +394,40 @@ let ``State.exitJointConsensus keeps leader when leader remains in config`` () =
     Assert.Equal(Leader, updated.Role)
     Assert.Equal(SinglePhase, updated.ConfigPhase)
     Assert.Equal(2, updated.Config.Peers.Length)
+
+[<Fact>]
+let ``State.exitJointConsensus steps down leader when leader is removed from config`` () =
+    let config =
+        { dummyConfig with
+            Peers =
+                [ { Id = 2
+                    Host = "127.0.0.1"
+                    Port = 5002 }
+                  { Id = 3
+                    Host = "127.0.0.1"
+                    Port = 5003 } ] }
+
+    let state = State.initLeaderState (State.init config None)
+    Assert.Equal(Leader, state.Role)
+
+    let oldPeers = config.Peers
+    let newPeers = [ { Id = 1; Host = ""; Port = 0 }; { Id = 4; Host = ""; Port = 0 } ]
+    let jointState = State.enterJointConsensus oldPeers newPeers state
+    Assert.Contains(1, jointState.Config.Peers |> List.map (fun p -> p.Id))
+
+    let finalPeers =
+        [ { Id = 2; Host = ""; Port = 0 }; { Id = 4; Host = ""; Port = 0 } ]
+
+    let updated = State.exitJointConsensus finalPeers jointState
+
+    Assert.Equal(Follower, updated.Role)
+    Assert.Equal(SinglePhase, updated.ConfigPhase)
+    Assert.Equal(2, updated.Config.Peers.Length)
+    Assert.Equal(2, updated.Config.Peers.[0].Id)
+    Assert.Equal(4, updated.Config.Peers.[1].Id)
+    Assert.Equal(None, updated.LeaderState)
+    Assert.Equal(None, updated.CurrentLeader)
+    Assert.Empty updated.VotesReceived
 
 [<Fact>]
 let ``State.hasQuorumJoint requires majority in both configs`` () =
