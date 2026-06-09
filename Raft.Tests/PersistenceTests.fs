@@ -54,7 +54,8 @@ let ``FilePersistence.Save serializes and Load deserializes state correctly`` ()
                     ClientId = None
                     SeqNum = None } ]
           Snapshot = None
-          SessionTable = Map.empty }
+          SessionTable = Map.empty
+          LastConfigIndex = 0L }
 
     try
         persistence.Save originalState
@@ -82,7 +83,8 @@ let ``FilePersistence.Save overwrites previously saved state with new state`` ()
           VotedFor = None
           Log = Map.empty
           Snapshot = None
-          SessionTable = Map.empty }
+          SessionTable = Map.empty
+          LastConfigIndex = 0L }
 
     let state2: PersistentState =
         { CurrentTerm = 2L
@@ -95,7 +97,8 @@ let ``FilePersistence.Save overwrites previously saved state with new state`` ()
                     ClientId = None
                     SeqNum = None } ]
           Snapshot = None
-          SessionTable = Map.empty }
+          SessionTable = Map.empty
+          LastConfigIndex = 0L }
 
     try
         persistence.Save state1

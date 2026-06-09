@@ -63,11 +63,15 @@ module Log =
     let appendEntriesToLog log entries =
         entries |> List.fold (fun m e -> Map.add e.Index e m) log
 
-    let truncateAndAppend log entry rest =
-        let before =
-            log |> Map.toSeq |> Seq.takeWhile (fun (k, _) -> k < entry.Index) |> Map.ofSeq
+    [<TailCall>]
+    let rec removeFrom lg idx =
+        match lg |> Map.tryFind idx with
+        | None -> lg
+        | Some _ -> removeFrom (lg.Remove idx) (idx + 1L)
 
-        entry :: rest |> appendEntriesToLog before
+    let truncateAndAppend log entry rest =
+        let pruned = removeFrom log entry.Index
+        entry :: rest |> appendEntriesToLog pruned
 
     [<TailCall>]
     let rec _merge log =

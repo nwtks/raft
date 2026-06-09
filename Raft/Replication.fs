@@ -33,20 +33,19 @@ module Replication =
         prevLogIndex = Log.initialLogIndex
         || Log.termAt prevLogIndex log = prevLogTerm && prevLogIndex <= Log.lastIndex log
 
+    [<TailCall>]
+    let rec findFirstIdx idx term log =
+        if idx > Log.firstLogIndex && Log.termAt (idx - 1L) log = term then
+            findFirstIdx (idx - 1L) term log
+        else
+            idx
+
     let calculateConflictInfo ae log =
         if ae.PrevLogIndex > Log.lastIndex log then
             Log.initialTerm, Log.lastIndex log + 1L
         else
             let term = Log.termAt ae.PrevLogIndex log
-
-            let firstIdx =
-                let mutable idx = ae.PrevLogIndex
-
-                while idx > Log.firstLogIndex && Log.termAt (idx - 1L) log = term do
-                    idx <- idx - 1L
-
-                idx
-
+            let firstIdx = findFirstIdx ae.PrevLogIndex term log
             term, firstIdx
 
     let acceptAppendEntries ae state =

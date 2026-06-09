@@ -96,7 +96,8 @@ let ``Replication.handleAppendEntries rejects request when leader term is lower 
                   VotedFor = None
                   Log = Map.empty
                   Snapshot = None
-                  SessionTable = Map.empty } }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L } }
 
     let ae =
         { LeaderTerm = 1L
@@ -120,7 +121,8 @@ let ``Replication.handleAppendEntries appends entries and updates commit index o
                   VotedFor = None
                   Log = Map.empty
                   Snapshot = None
-                  SessionTable = Map.empty } }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L } }
 
     let ae =
         { LeaderTerm = 1L
@@ -145,7 +147,8 @@ let ``Replication.handleAppendEntries rejects when PrevLogIndex term mismatches 
                   VotedFor = None
                   Log = logFromList [ dummyEntry ]
                   Snapshot = None
-                  SessionTable = Map.empty } }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L } }
 
     let ae =
         { LeaderTerm = 2L
@@ -174,7 +177,8 @@ let ``Replication.handleAppendEntries rejects when PrevLogIndex exceeds follower
                             ClientId = None
                             SeqNum = None } ]
                   Snapshot = None
-                  SessionTable = Map.empty } }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L } }
 
     let ae =
         { LeaderTerm = 2L
@@ -206,7 +210,8 @@ let ``Replication.handleAppendEntries with PrevLogIndex > log last index returns
                   VotedFor = None
                   Log = log
                   Snapshot = None
-                  SessionTable = Map.empty }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L }
             CurrentLeader = Some 2 }
 
     let ae =
@@ -239,7 +244,8 @@ let ``Replication.handleAppendEntries with conflict at log index 1 triggers firs
                   VotedFor = None
                   Log = log
                   Snapshot = None
-                  SessionTable = Map.empty }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L }
             CurrentLeader = Some 3 }
 
     let ae =
@@ -299,7 +305,8 @@ let ``Replication.handleAppendEntriesResponse decrements NextIndex on failure to
                   VotedFor = None
                   Log = logFromList [ dummyEntry ]
                   Snapshot = None
-                  SessionTable = Map.empty }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L }
             LeaderState = Some leaderState }
 
     let resp =
@@ -344,7 +351,8 @@ let ``Replication.handleAppendEntriesResponse uses ConflictTerm optimization whe
                             ClientId = None
                             SeqNum = None } ]
                   Snapshot = None
-                  SessionTable = Map.empty }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L }
             LeaderState = Some leaderState }
 
     let resp =
@@ -378,7 +386,8 @@ let ``Replication.handleAppendEntriesResponse uses ConflictIndex when leader has
                             ClientId = None
                             SeqNum = None } ]
                   Snapshot = None
-                  SessionTable = Map.empty }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L }
             LeaderState = Some leaderState }
 
     let resp =
@@ -406,7 +415,8 @@ let ``Replication.handleAppendEntriesResponse with success updates match and nex
                   VotedFor = None
                   Log = Map.empty
                   Snapshot = None
-                  SessionTable = Map.empty }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L }
             LeaderState = Some ls }
 
     let resp =
@@ -443,7 +453,8 @@ let ``Replication.handleAppendEntriesResponse with ConflictTerm decrements NextI
                   VotedFor = None
                   Log = log
                   Snapshot = None
-                  SessionTable = Map.empty }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L }
             LeaderState = Some ls }
 
     let resp =
@@ -479,7 +490,8 @@ let ``Replication.handleAppendEntriesResponse with ConflictTerm not found in log
                   VotedFor = None
                   Log = log
                   Snapshot = None
-                  SessionTable = Map.empty }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L }
             LeaderState = Some ls }
 
     let resp =
@@ -507,7 +519,8 @@ let ``Replication.handleAppendEntriesResponse with ConflictTerm=0 uses ConflictI
                   VotedFor = None
                   Log = Map.empty
                   Snapshot = None
-                  SessionTable = Map.empty }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L }
             LeaderState = Some ls }
 
     let resp =
@@ -557,7 +570,8 @@ let ``Replication.createInstallSnapshot returns Some when snapshot exists and fo
                         { LastIncludedIndex = 3L
                           LastIncludedTerm = 1L
                           StateMachineData = "snap" }
-                  SessionTable = Map.empty }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L }
             LeaderState = Some ls }
 
     let snap = Replication.createInstallSnapshot 2 state
@@ -592,7 +606,8 @@ let ``Replication.createInstallSnapshot returns None when snapshot is behind fol
                         { LastIncludedIndex = 5L
                           LastIncludedTerm = 1L
                           StateMachineData = "snap" }
-                  SessionTable = Map.empty }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L }
             LeaderState = Some ls }
 
     let snap = Replication.createInstallSnapshot 2 state
@@ -613,7 +628,8 @@ let ``Replication.handleInstallSnapshot rejects when leader term is lower`` () =
                   VotedFor = None
                   Log = Map.empty
                   Snapshot = None
-                  SessionTable = Map.empty } }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L } }
 
     let snap =
         { LeaderTerm = 2L
@@ -652,7 +668,8 @@ let ``Replication.handleInstallSnapshot installs snapshot and trims log`` () =
                             ClientId = None
                             SeqNum = None } ]
                   Snapshot = None
-                  SessionTable = Map.empty } }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L } }
 
     let snap =
         { LeaderTerm = 2L
@@ -695,7 +712,8 @@ let ``Replication.handleInstallSnapshotResponse updates match and next index on 
                   VotedFor = None
                   Log = Map.empty
                   Snapshot = None
-                  SessionTable = Map.empty }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L }
             LeaderState = Some ls }
 
     let resp =
@@ -736,7 +754,8 @@ let ``Replication.advanceCommitIndex advances commit index when majority of peer
                   VotedFor = None
                   Log = logFromList [ dummyEntry ]
                   Snapshot = None
-                  SessionTable = Map.empty }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L }
             LeaderState = Some leaderState
             Volatile = { CommitIndex = 0L; LastApplied = 0L } }
 
@@ -763,7 +782,8 @@ let ``Replication.handleAppendEntriesResponse ignores stale response with lower 
                   VotedFor = None
                   Log = Map.empty
                   Snapshot = None
-                  SessionTable = Map.empty }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L }
             LeaderState = Some ls }
 
     let resp =
@@ -791,7 +811,8 @@ let ``Replication.handleInstallSnapshotResponse ignores failed response from fol
                   VotedFor = None
                   Log = Map.empty
                   Snapshot = None
-                  SessionTable = Map.empty }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L }
             LeaderState = Some ls }
 
     let resp =
@@ -828,7 +849,8 @@ let ``Replication.advanceCommitIndex does not advance when term does not match c
                             ClientId = None
                             SeqNum = None } ]
                   Snapshot = None
-                  SessionTable = Map.empty }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L }
             LeaderState = Some leaderState
             Volatile = { CommitIndex = 0L; LastApplied = 0L } }
 

@@ -19,7 +19,7 @@ let ``State.recoverConfigPhase detects JointPhase from log`` () =
                 ClientId = None
                 SeqNum = None } ]
 
-    let phase, updatedConfig = State.recoverConfigPhase log dummyConfig
+    let phase, updatedConfig = State.recoverConfigPhase log dummyConfig 1L
 
     match phase with
     | JointPhase(_, np) ->
@@ -41,7 +41,7 @@ let ``State.recoverConfigPhase detects FinalChange from log`` () =
                 ClientId = None
                 SeqNum = None } ]
 
-    let phase, updatedConfig = State.recoverConfigPhase log dummyConfig
+    let phase, updatedConfig = State.recoverConfigPhase log dummyConfig 1L
 
     Assert.Equal(SinglePhase, phase)
     Assert.Equal(2, updatedConfig.Peers.Length)
@@ -50,7 +50,7 @@ let ``State.recoverConfigPhase detects FinalChange from log`` () =
 [<Fact>]
 let ``State.recoverConfigPhase returns SinglePhase when no config entries in log`` () =
     let log = logFromList []
-    let phase, updatedConfig = State.recoverConfigPhase log dummyConfig
+    let phase, updatedConfig = State.recoverConfigPhase log dummyConfig 0L
 
     Assert.Equal(SinglePhase, phase)
     Assert.Equal(dummyConfig.Peers.Length, updatedConfig.Peers.Length)
@@ -82,7 +82,7 @@ let ``State.recoverConfigPhase picks latest config change from multiple entries`
                 ClientId = None
                 SeqNum = None } ]
 
-    let phase, updatedConfig = State.recoverConfigPhase log dummyConfig
+    let phase, updatedConfig = State.recoverConfigPhase log dummyConfig 2L
 
     Assert.Equal(SinglePhase, phase)
     Assert.Equal(1, updatedConfig.Peers.Length)
@@ -112,7 +112,8 @@ let ``State.init with persisted state restores CurrentTerm, VotedFor, and Log co
                     ClientId = None
                     SeqNum = None } ]
           Snapshot = None
-          SessionTable = Map.empty }
+          SessionTable = Map.empty
+          LastConfigIndex = 0L }
 
     let state = State.init dummyConfigStandalone (Some loaded)
 
@@ -271,7 +272,8 @@ let ``State.takeSnapshot trims log and stores snapshot`` () =
                   VotedFor = None
                   Log = logFromList entries
                   Snapshot = None
-                  SessionTable = Map.empty } }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L } }
 
     let snapped = State.takeSnapshot 2L 1L "state-data" state
 

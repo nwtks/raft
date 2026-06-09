@@ -534,7 +534,8 @@ let ``broadcastAppendEntries falls back to InstallSnapshot when follower is behi
                         { LastIncludedIndex = 3L
                           LastIncludedTerm = 1L
                           StateMachineData = "snap" }
-                  SessionTable = Map.empty }
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L }
             LeaderState = Some ls
             Volatile = { CommitIndex = 3L; LastApplied = 3L } }
 

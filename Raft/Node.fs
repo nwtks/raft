@@ -31,13 +31,18 @@ type RaftNode
                   CancellationTokenSource = cts
                   PendingReads = [] }
 
+            let initialTimer =
+                NodeTimer.getRandomElectionTimeout config
+                |> NodeTimer.createTimer inbox ElectionTimeout
+                |> Some
+
             NodeAgent.agentLoop
                 { ctx with
-                    ElectionTimer = NodeTimer.resetElectionTimer ctx })
+                    ElectionTimer = initialTimer })
 
     do
         try
-            transport.StartListener config (RaftRPC >> agent.Post) cts.Token |> ignore
+            transport.StartListener config (RaftRPC >> agent.Post) cts.Token |> Async.Start
         with
         | :? System.Net.Sockets.SocketException as ex ->
             NodeUtil.log $"Failed to start transport listener (Socket): {ex.Message}"

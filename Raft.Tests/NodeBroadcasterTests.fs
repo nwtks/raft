@@ -26,7 +26,8 @@ let ``NodeBroadcaster.sendAppendEntriesOrSnapshot sends InstallSnapshot when fol
                     { LastIncludedIndex = 1L
                       LastIncludedTerm = 1L
                       StateMachineData = "snap-data" }
-              SessionTable = Map.empty }
+              SessionTable = Map.empty
+              LastConfigIndex = 0L }
           Volatile = { CommitIndex = 1L; LastApplied = 1L }
           LeaderState =
             Some

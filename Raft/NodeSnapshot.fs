@@ -1,6 +1,18 @@
 namespace Raft
 
 module NodeSnapshot =
+    let handleTakeSnapshot ctx data (ch: AsyncReplyChannel<unit>) =
+        let lastApplied = ctx.State.Volatile.LastApplied
+        let lastTerm = Log.termAt lastApplied ctx.State.Persistent.Log
+        let state = State.takeSnapshot lastApplied lastTerm data ctx.State
+        NodeUtil.saveIfChanged ctx state
+        ch.Reply()
+
+        { State = state
+          ElectionAction = Keep
+          HeartbeatAction = Keep
+          PendingReads = ctx.PendingReads }
+
     let autoSnapshotIfNeeded ctx state =
         if ctx.Config.SnapshotAutoThreshold > 0 then
             let lastSnapIndex =

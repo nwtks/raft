@@ -1,54 +1,44 @@
 namespace Raft
 
 module NodeAgent =
+    let postProcess ctx (result: MessageResult) =
+        let electionTimer = NodeTimer.applyElectionAction ctx result.ElectionAction
+        let heartbeatTimer = NodeTimer.applyHeartbeatAction ctx result.HeartbeatAction
+
+        { ctx with
+            State = result.State
+            ElectionTimer = electionTimer
+            HeartbeatTimer = heartbeatTimer
+            PendingReads = result.PendingReads
+            Config =
+                if result.State.Config <> ctx.Config then
+                    result.State.Config
+                else
+                    ctx.Config }
+
     [<TailCall>]
     let rec agentLoop ctx =
         async {
             let! msg = ctx.Inbox.Receive()
 
             match msg with
-            | ElectionTimeout ->
-                let state, electionTimer = NodeTimeout.receiveElectionTimeout ctx
-                let remainingReads = NodeRead.processPendingReads ctx.PendingReads state
-
-                return!
-                    agentLoop
-                        { ctx with
-                            State = state
-                            ElectionTimer = electionTimer
-                            PendingReads = remainingReads }
-            | HeartbeatTimeout ->
-                let state, heartbeatTimer = NodeTimeout.receiveHeartbeatTimeout ctx
-
-                return!
-                    agentLoop
-                        { ctx with
-                            State = state
-                            HeartbeatTimer = heartbeatTimer }
-            | RaftRPC rpcMsg ->
-                let state, electionTimer, heartbeatTimer = NodeRaft.receiveRaftRPC ctx rpcMsg
-
-                let newCtx =
-                    NodeRaft.handleRaftRPCResult ctx rpcMsg state electionTimer heartbeatTimer
-
-                return! agentLoop newCtx
-            | GetState ch ->
-                ch.Reply ctx.State
-                return! agentLoop ctx
-            | ClientCommand _
-            | AddPeer _
-            | RemovePeer _ as localMsg -> return! agentLoop (NodeLocal.handleLocalMessageResult ctx localMsg)
-            | LinearizableRead replyChannel -> return! agentLoop (NodeRead.handleLinearizableRead ctx replyChannel)
-            | TakeSnapshot(data, ch) ->
-                let lastApplied = ctx.State.Volatile.LastApplied
-                let lastTerm = Log.termAt lastApplied ctx.State.Persistent.Log
-                let state = State.takeSnapshot lastApplied lastTerm data ctx.State
-                NodeUtil.saveIfChanged ctx state
-                ch.Reply()
-                return! agentLoop { ctx with State = state }
             | Shutdown ch ->
                 NodeTimer.disposeTimer ctx.ElectionTimer
                 NodeTimer.disposeTimer ctx.HeartbeatTimer
                 ctx.CancellationTokenSource.Cancel()
                 ch.Reply()
+            | ElectionTimeout -> return! NodeTimeout.handleElectionTimeout ctx |> postProcess ctx |> agentLoop
+            | HeartbeatTimeout -> return! NodeTimeout.handleHeartbeatTimeout ctx |> postProcess ctx |> agentLoop
+            | RaftRPC rpcMsg -> return! NodeRaft.handleRaftRPC ctx rpcMsg |> postProcess ctx |> agentLoop
+            | GetState ch ->
+                ch.Reply ctx.State
+                return! agentLoop ctx
+            | ClientCommand _
+            | AddPeer _
+            | RemovePeer _ as localMsg ->
+                return! NodeLocal.handleLocalMessage ctx localMsg |> postProcess ctx |> agentLoop
+            | LinearizableRead replyChannel ->
+                return! NodeRead.handleLinearizableRead ctx replyChannel |> postProcess ctx |> agentLoop
+            | TakeSnapshot(data, ch) ->
+                return! NodeSnapshot.handleTakeSnapshot ctx data ch |> postProcess ctx |> agentLoop
         }

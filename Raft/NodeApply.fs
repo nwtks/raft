@@ -10,13 +10,15 @@ module NodeApply =
                 State.updateSessionTable cId sNum state
             | _ -> state
 
+        let stateWithIndex = State.updateLastConfigIndex entry.Index stateWithSession
+
         match ConfigChange.parse entry.Command with
-        | Some(JointChange(oldPeers, newPeers)) -> State.enterJointConsensus oldPeers newPeers stateWithSession
-        | Some(FinalChange newPeers) -> State.exitJointConsensus newPeers stateWithSession
+        | Some(JointChange(oldPeers, newPeers)) -> State.enterJointConsensus oldPeers newPeers stateWithIndex
+        | Some(FinalChange newPeers) -> State.exitJointConsensus newPeers stateWithIndex
         | None ->
             let json = entry.Command.Substring ConfigChange.ConfigCommandPrefix.Length
             let newPeers = System.Text.Json.JsonSerializer.Deserialize<PeerInfo list> json
-            State.updateConfig newPeers stateWithSession
+            State.updateConfig newPeers stateWithIndex
 
     let applyNormalEntry onApply entry state =
         let isDuplicate =

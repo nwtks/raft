@@ -40,12 +40,18 @@ module NodeRead =
             let remainingReads =
                 processPendingReads (ctx.PendingReads @ [ pendingRead ]) ctx.State
 
-            { ctx with
-                PendingReads = remainingReads }
+            { State = ctx.State
+              ElectionAction = Keep
+              HeartbeatAction = Keep
+              PendingReads = remainingReads }
         else
             let leaderInfo =
                 ctx.State.CurrentLeader
                 |> Option.bind (fun leaderId -> ctx.Config.Peers |> List.tryFind (fun p -> p.Id = leaderId))
 
             ReadRedirect leaderInfo |> replyChannel.Reply
-            ctx
+
+            { State = ctx.State
+              ElectionAction = Keep
+              HeartbeatAction = Keep
+              PendingReads = ctx.PendingReads }

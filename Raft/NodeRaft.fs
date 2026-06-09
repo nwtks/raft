@@ -1,16 +1,17 @@
 namespace Raft
 
 module NodeRaft =
+    let sendResponse ctx peerId msg =
+        match ctx.Config.Peers |> List.tryFind (fun p -> p.Id = peerId) with
+        | Some peer -> NodeUtil.sendAsync ctx.Transport peer msg
+        | None -> NodeUtil.log $"Warning: Unknown peer {peerId} — cannot send response"
+
     let handleRaftMessage ctx =
         function
         | RequestVoteMsg requestVote ->
             let state, response = Election.handleRequestVote requestVote ctx.State
             NodeUtil.saveIfChanged ctx state
-
-            match ctx.Config.Peers |> List.tryFind (fun p -> p.Id = requestVote.CandidateId) with
-            | Some peer -> NodeUtil.sendAsync ctx.Transport peer (RequestVoteResponseMsg response)
-            | None -> NodeUtil.log $"Warning: Unknown candidate {requestVote.CandidateId} for RequestVote response"
-
+            sendResponse ctx requestVote.CandidateId (RequestVoteResponseMsg response)
             state, true
         | RequestVoteResponseMsg response ->
             let state = Election.handleVoteResponse response.VoterId response ctx.State
@@ -19,11 +20,7 @@ module NodeRaft =
         | AppendEntriesMsg appendEntries ->
             let state, response = Replication.handleAppendEntries appendEntries ctx.State
             NodeUtil.saveIfChanged ctx state
-
-            match ctx.Config.Peers |> List.tryFind (fun p -> p.Id = appendEntries.LeaderId) with
-            | Some peer -> NodeUtil.sendAsync ctx.Transport peer (AppendEntriesResponseMsg response)
-            | None -> NodeUtil.log $"Warning: Unknown leader {appendEntries.LeaderId} for AppendEntries response"
-
+            sendResponse ctx appendEntries.LeaderId (AppendEntriesResponseMsg response)
             state, true
         | AppendEntriesResponseMsg response ->
             let state =
@@ -47,10 +44,7 @@ module NodeRaft =
                 }
                 |> Async.Start
 
-            match ctx.Config.Peers |> List.tryFind (fun p -> p.Id = snap.LeaderId) with
-            | Some peer -> NodeUtil.sendAsync ctx.Transport peer (InstallSnapshotResponseMsg response)
-            | None -> NodeUtil.log $"Warning: Unknown leader {snap.LeaderId} for InstallSnapshot response"
-
+            sendResponse ctx snap.LeaderId (InstallSnapshotResponseMsg response)
             state, true
         | InstallSnapshotResponseMsg response ->
             let state =
@@ -60,7 +54,7 @@ module NodeRaft =
             NodeUtil.saveIfChanged ctx state
             state, false
 
-    let receiveRaftRPC ctx rpcMsg =
+    let handleRaftRPC ctx rpcMsg =
         let oldRole = ctx.State.Role
         let state, sendReply = handleRaftMessage ctx rpcMsg
 
@@ -69,16 +63,13 @@ module NodeRaft =
             |> NodeSnapshot.autoSnapshotIfNeeded ctx
             |> NodePromotion.tryFinalizeConfiguration
 
-        let electionTimer, heartbeatTimer =
-            NodeTimer.updateTimersOnRoleChange ctx oldRole newState sendReply
+        let electionAction, heartbeatAction =
+            NodeTimer.getTimerActionsOnRoleChange ctx oldRole newState sendReply
 
-        newState, electionTimer, heartbeatTimer
-
-    let handleRaftRPCResult ctx rpcMsg state electionTimer heartbeatTimer =
         let updatedReads =
             match rpcMsg with
             | AppendEntriesResponseMsg resp when
-                state.Role = Leader && resp.FollowerTerm <= state.Persistent.CurrentTerm
+                newState.Role = Leader && resp.FollowerTerm <= newState.Persistent.CurrentTerm
                 ->
                 ctx.PendingReads
                 |> List.map (fun pendingRead ->
@@ -86,16 +77,9 @@ module NodeRaft =
                         Responses = Set.add resp.FollowerId pendingRead.Responses })
             | _ -> ctx.PendingReads
 
-        let remainingReads = NodeRead.processPendingReads updatedReads state
+        let remainingReads = NodeRead.processPendingReads updatedReads newState
 
-        let newCtx =
-            { ctx with
-                State = state
-                ElectionTimer = electionTimer
-                HeartbeatTimer = heartbeatTimer
-                PendingReads = remainingReads }
-
-        if state.Config <> ctx.Config then
-            { newCtx with Config = state.Config }
-        else
-            newCtx
+        { State = newState
+          ElectionAction = electionAction
+          HeartbeatAction = heartbeatAction
+          PendingReads = remainingReads }

@@ -6,6 +6,14 @@ A purely functional, highly robust implementation of the [Raft Consensus Algorit
 
 This project implements the core mechanics of Raft — Leader Election and Log Replication — using F#'s strong type system, immutability, and actor model (`MailboxProcessor`). It focuses on thread-safety and correctness, avoiding complex locking mechanisms by serializing all state updates through message passing.
 
+## Project Structure
+
+| Project | Type | Description |
+|---------|------|-------------|
+| `Raft/` | Library | Core Raft consensus algorithm (election, replication, log, state machine, transport, persistence) |
+| `Raft.App/` | CLI App | 3-node Key-Value Store cluster demo with interactive REPL |
+| `Raft.Tests/` | Test Suite | 217 unit and integration tests (xUnit + Coverlet) |
+
 ## Features
 
 - **Leader Election:** Randomized election timeouts, `RequestVote` RPC handling, and dynamic leader promotion on majority vote.
@@ -16,9 +24,23 @@ This project implements the core mechanics of Raft — Leader Election and Log R
 - **Session De-duplication:** Client-side session tracking prevents duplicate command execution during leader failover or network retries.
 - **Actor Model Design:** Non-blocking, thread-safe state machine using F#'s `MailboxProcessor` (`NodeAgent.fs`). State is fully immutable; each message handler returns a new `RaftState` threaded through a tail-recursive `agentLoop`.
 - **TCP Transport Layer:** Custom JSON-based RPC serialization over raw TCP sockets with length-prefixed framing and hand-written `System.Text.Json` converters (`Transport.fs`, `Serialization.fs`).
-- **Crash Recovery & Persistence:** Atomic disk persistence for `PersistentState` (`CurrentTerm`, `VotedFor`, `Log`, `Snapshot`, `SessionTable`) via a `.tmp`-swap write, ensuring state integrity across restarts (`Persistence.fs`).
+- **Crash Recovery & Persistence:** Atomic disk persistence for `PersistentState` (`CurrentTerm`, `VotedFor`, `Log`, `Snapshot`, `SessionTable`, `LastConfigIndex`) via a `.tmp`-swap write with orphan cleanup on load, ensuring state integrity across restarts (`Persistence.fs`).
 - **Interactive Cluster Demo:** A 3-node Key-Value Store (KVS) cluster demo with `put`, `get`, `state`, and `quit` commands (`Raft.App`).
 - **Comprehensive Test Suite:** Unit and integration tests covering election, log operations, replication, actor behaviour, transport, persistence, and cluster membership changes.
+
+## Configuration
+
+Each node is configured via `NodeConfig` (defined in `Types.fs`):
+
+| Field | Description |
+|-------|-------------|
+| `NodeId` | Unique node identifier |
+| `Host` | IP address to bind the transport listener |
+| `Port` | TCP port for inter-node RPC communication |
+| `Peers` | List of peer `PeerInfo` (id, host, port) |
+| `ElectionTimeoutMinMs` / `ElectionTimeoutMaxMs` | Random election timeout range (ms) |
+| `HeartbeatIntervalMs` | Leader heartbeat interval (ms) |
+| `SnapshotAutoThreshold` | Log entries before auto-compaction triggers (0 = disabled) |
 
 ## Prerequisites
 

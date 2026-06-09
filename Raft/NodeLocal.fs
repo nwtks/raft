@@ -75,7 +75,7 @@ module NodeLocal =
             replyChannel.Reply false
             ctx.State
 
-    let handleLocalMessage ctx =
+    let dispatchLocalMessage ctx =
         function
         | ClientCommand(cmd, clientId, seqNum, replyChannel) -> handleClientCommand ctx cmd clientId seqNum replyChannel
         | AddPeer(peerInfo, replyChannel) -> handleAddPeer ctx peerInfo replyChannel
@@ -84,17 +84,15 @@ module NodeLocal =
             NodeUtil.log $"Warning: unexpected message routed to handleLocalMessage, ignoring"
             ctx.State
 
-    let handleLocalMessageResult ctx localMsg =
+    let handleLocalMessage ctx localMsg =
         let oldRole = ctx.State.Role
-        let state = handleLocalMessage ctx localMsg
+        let state = dispatchLocalMessage ctx localMsg
         let remainingReads = NodeRead.processPendingReads ctx.PendingReads state
 
-        let electionTimer, heartbeatTimer =
-            NodeTimer.updateTimersOnRoleChange ctx oldRole state false
+        let electionAction, heartbeatAction =
+            NodeTimer.getTimerActionsOnRoleChange ctx oldRole state false
 
-        { ctx with
-            State = state
-            Config = state.Config
-            ElectionTimer = electionTimer
-            HeartbeatTimer = heartbeatTimer
-            PendingReads = remainingReads }
+        { State = state
+          ElectionAction = electionAction
+          HeartbeatAction = heartbeatAction
+          PendingReads = remainingReads }

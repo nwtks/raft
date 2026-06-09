@@ -2,6 +2,15 @@
 
 This file provides guidance for AI agents working in this repository.
 
+## Policy
+
+- **Do not** include information that can be understood by reading the codebase (file names, function signatures, type definitions, etc.).
+- **Do not** duplicate information that already exists in `README.md`.
+
+Prefer documenting conventions, design rationale, non-obvious constraints, and cross-cutting concerns that are not apparent from the source code or the README.
+
+- **Record design trade-offs** in the `Design Trade-offs` section whenever a significant architectural decision is made — include the rationale, the alternatives considered, and the pros/cons.
+
 ## Tech Stack
 
 - **Language**: F# on .NET 10.0
@@ -9,56 +18,15 @@ This file provides guidance for AI agents working in this repository.
 - **Serialization**: `System.Text.Json` with custom `RaftMessageConverter` and `OptionConverterFactory` (see `Serialization.fs`)
 - **Test framework**: xunit.v3 with Coverlet for coverage
 
-## Project Layout
-
-| Project | Type | Role |
-|---|---|---|
-| `Raft/` | Library | Core Raft algorithm — all algorithm logic lives here |
-| `Raft.App/` | Executable | CLI demo: 3-node KVS cluster |
-| `Raft.Tests/` | Test | xUnit test suite |
-
-### Key files in `Raft/`
-
-| File | Responsibility |
-|---|---|
-| `Types.fs` | Core types: `NodeId`, `Term`, `LogIndex`, `LogEntry`, `NodeRole`, all RPC message/response types, `PeerInfo`, `NodeConfig` |
-| `Log.fs` | Pure log operations: `append`, `appendWithSession`, `mergeEntries` (conflict resolution), `entriesFrom`, `getEntry`, `termAt`, `lastIndexOfTerm`, `trim` |
-| `ConfigChange.fs` | Cluster membership change: `ConfigChangeData` DU (`JointChange` / `FinalChange`), `serialize`, `parse`, `ConfigCommandPrefix` |
-| `State.fs` | `Snapshot`, `PersistentState`, `VolatileState`, `LeaderState`, `ConfigPhase`, `RaftState`; `IPersistence` interface; pure state-transition helpers (`init`, `initLeaderState`, `updateTerm`, `takeSnapshot`, `updateSessionTable`, `enterJointConsensus`, `exitJointConsensus`, `hasQuorum`) |
-| `Election.fs` | `startElection`, `createRequestVote`, `handleRequestVote`, `handleVoteResponse`; quorum promotion to Leader |
-| `Replication.fs` | `createAppendEntries`, `createHeartbeat`, `createInstallSnapshot`, `handleAppendEntries`, `handleAppendEntriesResponse`, `handleInstallSnapshot`, `handleInstallSnapshotResponse`, `advanceCommitIndex`, `appendCommand`, `appendCommandWithSession`, `appendJointConsensus`, `appendFinalConfiguration` |
-| `NodeTypes.fs` | `NodeMessage` DU; `ClientCommandResult`, `ReadCommandResult`, `PendingRead`; `ITransport` interface; `NodeContext` record (threaded through agent loop) |
-| `NodeUtil.fs` | Shared helpers: `log`, `sendAsync` (fire-and-forget), `saveIfChanged` (flush `PersistentState` to disk when dirty) |
-| `NodeBroadcaster.fs` | Outbound message broadcasting: `broadcastRequestVote`, `broadcastHeartbeat`, `broadcastAppendEntries`, `sendAppendEntriesOrSnapshot` |
-| `NodeTimer.fs` | Timer management: `resetElectionTimer`, `resetHeartbeatTimer`, `stopTimer`, `disposeTimer`, `updateTimersOnRoleChange` |
-| `NodeApply.fs` | Entry application: `applyCommitted`, `loopApplyCommitted`, `applyConfigChangeEntry`, `applyNormalEntry` (with session de-duplication) |
-| `NodeRead.fs` | Linearizable read: `handleLinearizableRead`, `processPendingReads`, `canServePendingRead` |
-| `NodeSnapshot.fs` | Automatic log compaction: `autoSnapshotIfNeeded` (triggered by `SnapshotAutoThreshold`) |
-| `NodePromotion.fs` | Non-voting peer promotion: `tryPromoteNonVotingPeers`, `tryFinalizeConfiguration` (two-phase config change completion) |
-| `NodeTimeout.fs` | Timeout handlers: `receiveElectionTimeout`, `receiveHeartbeatTimeout` |
-| `NodeRaft.fs` | RPC dispatch: `handleRaftMessage`, `receiveRaftRPC`, `handleRaftRPCResult` |
-| `NodeLocal.fs` | Local message dispatch: `handleLocalMessage`, `handleClientCommand`, `handleAddPeer`, `handleRemovePeer`, `handleLocalMessageResult` |
-| `NodeAgent.fs` | Core agent loop: `agentLoop` (tail-recursive); routes `NodeMessage` to the handler modules above |
-| `Node.fs` | `RaftNode` public API class: constructor, `SubmitCommand`, `SubmitCommandWithSession`, `LinearizableRead`, `PostLinearizableRead`, `SubmitTakeSnapshot`, `AddPeer`, `RemovePeer`, `GetState`, `TriggerElectionTimeout`, `TriggerHeartbeatTimeout`, `Dispose` |
-| `Serialization.fs` | Custom `System.Text.Json` converters: `RaftMessageConverter`, `OptionConverter` / `OptionConverterFactory`, `JsonConfig.options` |
-| `Transport.fs` | `TcpTransport`: async TCP listener + fire-and-forget sender using JSON over raw TCP |
-| `Persistence.fs` | `FilePersistence`: atomic disk writes to `state_{id}.json` via a `.tmp` swap |
+## Cross-platform
+The entire codebase, including test code, must run on both Windows and Linux.
+  - All file paths must use relative paths or `System.IO.Path` utilities; never hardcode path separators (`\` or `/`).
+  - Never use P/Invoke, platform-specific environment variables, or OS version checks.
+  - TCP/IP code uses only `System.Net.Sockets` (no platform-specific socket options).
+  - Persistence uses `System.IO.File.Move` with the `overwrite` parameter (supported on both platforms since .NET Core 3.0).
+  - Threading uses `System.Threading.Timer` and `MailboxProcessor` (cross-platform).
 
 ## Architecture
-
-```
-RaftNode (public API facade in Node.fs)
-  └── MailboxProcessor<NodeMessage>  (agentLoop in NodeAgent.fs)
-        ├── NodeRaft       (NodeRaft.fs)       — RPC dispatch: RequestVote / AppendEntries / InstallSnapshot
-        ├── NodeLocal      (NodeLocal.fs)       — ClientCommand / AddPeer / RemovePeer
-        ├── NodeTimeout    (NodeTimeout.fs)     — ElectionTimeout / HeartbeatTimeout
-        ├── NodeRead       (NodeRead.fs)        — LinearizableRead (quorum-based read index)
-        ├── NodeApply      (NodeApply.fs)       — apply committed entries to state machine
-        ├── NodeSnapshot   (NodeSnapshot.fs)    — automatic log compaction
-        ├── NodePromotion  (NodePromotion.fs)   — non-voting peer promotion & config finalization
-        ├── NodeBroadcaster (NodeBroadcaster.fs) — outbound message fire-and-forget
-        └── NodeTimer      (NodeTimer.fs)       — election / heartbeat timer management
-```
 
 Injected dependencies:
 - `ITransport`   (default: `TcpTransport`)  — [defined in `NodeTypes.fs`, impl in `Transport.fs`]
@@ -67,34 +35,18 @@ Injected dependencies:
 - `onInstallSnapshot: string -> unit`  — snapshot callback (called async to avoid blocking the agent loop)
 - `onGetSnapshotData: unit -> string`  — callback to obtain current state machine snapshot data
 
-Internally, the agent loop threads a `NodeContext` record (defined in `NodeTypes.fs`) through each step:
-
-```fsharp
-type NodeContext =
-    { Config: NodeConfig
-      Transport: ITransport
-      Persistence: IPersistence
-      OnApply: LogEntry -> unit
-      OnInstallSnapshot: string -> unit
-      OnGetSnapshotData: unit -> string
-      Inbox: MailboxProcessor<NodeMessage>
-      State: RaftState
-      ElectionTimer: System.Threading.Timer option
-      HeartbeatTimer: System.Threading.Timer option
-      CancellationTokenSource: System.Threading.CancellationTokenSource
-      PendingReads: PendingRead list }
-```
-
 State is **immutable**. Every handler returns a new `RaftState`; the agent loop threads it through via tail-recursive `agentLoop`. Never mutate `RaftState` directly.
 
-`PersistentState` (`CurrentTerm`, `VotedFor`, `Log`) must be flushed to disk **before** replying to any RPC. The `saveIfChanged` helper in `NodeAgent.fs` enforces this — always call it after state transitions.
+`PersistentState` (`CurrentTerm`, `VotedFor`, `Log`, `Snapshot`, `SessionTable`, `LastConfigIndex`) must be flushed to disk **before** replying to any RPC or timeout. The `saveIfChanged` helper in `NodeUtil.fs` enforces this — always call it after state transitions. `saveIfChanged` is *idempotent* (no-op if `Persistent` field unchanged) so it is safe to call unconditionally.
 
-### Timer Handling
+### Timer Handling — `TimerAction` Declarative Pattern
 
-- **Election timer**: one-shot `System.Threading.Timer`; reset on receiving any valid RPC, or on becoming Follower. Fires `ElectionTimeout` into the inbox.
-- **Heartbeat timer**: one-shot timer; reset whenever the node is Leader. Fires `HeartbeatTimeout` into the inbox.
-- Becoming Leader: stops the election timer, starts the heartbeat timer.
-- Stepping down: stops the heartbeat timer, restarts the election timer.
+- **Election timer**: one-shot `System.Threading.Timer`; fires `ElectionTimeout` into the inbox.
+- **Heartbeat timer**: one-shot timer; fires `HeartbeatTimeout` into the inbox.
+- Timers are controlled declaratively via `TimerAction` (`Keep | Reset | Stop`) carried in `MessageResult.ElectionAction` / `MessageResult.HeartbeatAction`.
+- Handlers never manipulate `System.Threading.Timer` directly; they return a `TimerAction` value. `NodeTimer.applyElectionAction` / `applyHeartbeatAction` in `postProcess` translate actions into actual `Timer.Change()` / `createTimer` calls.
+- `NodeTimer.getTimerActionsOnRoleChange` returns the correct `TimerAction` pair based on old/new role and `sendReply`. It also calls `broadcastHeartbeat` on Leader promotion.
+- Timer mutation (`Change`, `createTimer`) is centralized in `NodeTimer`, not scattered across handlers.
 
 ## Transport Wire Format
 
@@ -106,27 +58,6 @@ TCP connection timeout for outbound messages is **3 000 ms** (hardcoded in `Tran
 
 ## Test Suite
 
-| File | Coverage area |
-|---|---|
-| `TestHelpers.fs` | Shared test utilities: `MockTransport`, `MockPersistence`, config helpers |
-| `LogTests.fs` | `Log` module — pure log operations |
-| `StateTests.fs` | `State` module — init and state transitions |
-| `ElectionTests.fs` | `Election` module — vote granting, quorum, term updates |
-| `ReplicationTests.fs` | `Replication` module — AppendEntries, commit index |
-| `ConfigChangeTests.fs` | `ConfigChange` module — serialize/parse for `JointChange` / `FinalChange` |
-| `SerializationTests.fs` | `RaftMessageConverter` / `OptionConverter` — JSON round-trips |
-| `IntegrationTests.fs` | Multi-step pure-function scenarios (no TCP, no actors) |
-| `NodeReadTests.fs` | `NodeRead` module — linearizable read logic |
-| `NodeSnapshotTests.fs` | `NodeSnapshot` module — automatic log compaction |
-| `NodeApplyTests.fs` | `NodeApply` module — entry application with session de-duplication |
-| `NodePromotionTests.fs` | `NodePromotion` module — non-voting peer promotion |
-| `NodeBroadcasterTests.fs` | `NodeBroadcaster` module — message broadcasting |
-| `NodeLocalTests.fs` | `NodeLocal` module — local message dispatch |
-| `NodeRaftTests.fs` | `NodeRaft` module — RPC dispatch |
-| `NodeTests.fs` | `RaftNode` actor behaviour using `MockTransport` / `MockPersistence` |
-| `TransportTests.fs` | `TcpTransport` — real loopback TCP send/receive |
-| `PersistenceTests.fs` | `FilePersistence` — save/load round-trip and overwrite |
-
 **`IntegrationTests.fs`** exercises end-to-end Raft scenarios (leader election, log replication, log inconsistency recovery, split-brain, stale leader rejection) by calling the pure `Election`, `Replication`, and `State` module functions directly — **no TCP sockets, no `RaftNode` actor, no real timers**. These tests are fast and deterministic.
 
 **`TransportTests.fs`** is the only test file that opens real TCP sockets on loopback. It may conflict if ports are already in use; run in isolation when needed.
@@ -135,7 +66,74 @@ Maintain high unit test coverage (target: ≥ 80% line coverage).
 
 ## Coding Conventions
 
-- All algorithm logic goes in `Raft/` (pure functions where possible, no I/O side effects).
-- Side-effecting concerns (network, disk) are hidden behind `ITransport` / `IPersistence` interfaces and injected at the `RaftNode` constructor — keep them mockable.
-- Use `[<TailCall>]` on recursive functions (`agentLoop`, `Log._merge`, `inputLoop` in App) to prevent stack overflows.
+- **Prefer immutable state** — All `RaftState` transitions return a new state; never mutate in place.
+- **Use pure functions** — Algorithm logic (election, replication, log operations) goes in pure functions with no side effects; separate I/O into injected dependencies (`ITransport`, `IPersistence`).
+- **Favor expressions over statements** — Use `match` expressions, `if`/`then`/`else`, and pattern matching instead of imperative control flow.
+- **Leverage discriminated unions** — Model domain concepts (messages, roles, configuration phases, timer actions, pending reads) with DUs for exhaustiveness checking.
+- **Use `[<TailCall>]` on recursive functions** that loop (e.g., `agentLoop`, `findFirstIdx`) to prevent stack overflows.
+- **Declarative timer control** — Use `TimerAction` (`Keep | Reset | Stop`) instead of passing raw `System.Threading.Timer` values through `MessageResult`. Handlers declare *intent*; `postProcess` applies it.
+- **Uniform handler dispatch** — All message handlers return `MessageResult { State; ElectionAction; HeartbeatAction; PendingReads }`. The `agentLoop` is a pure dispatcher (match → handler → `postProcess` → tail-call). No inline logic except `Shutdown` cleanup and `GetState` pass-through.
 - Do not introduce new external NuGet packages without checking existing dependencies in the `.fsproj` files first.
+
+## Design Trade-offs
+
+### ITransport Async<unit> vs Task<unit>
+
+`ITransport` interface was unified to `Async<unit>` (previously `Task<unit>`).
+
+**Rationale**: `NodeAgent.agentLoop` is written with `async { }`, so unifying the entire codebase under a single async model avoids impedance mismatch.
+
+**Trade-offs**:
+- ✅ `NodeUtil.sendAsync` simplified from `Task.ContinueWith` to `async { try...with } |> Async.Start`, making error handling declarative
+- ✅ Tests (`MockTransport`) no longer need `Task.FromResult` — `async { return () }` is cleaner
+- ❌ Every call to a .NET `Task<T>` / `ValueTask<T>` API (`ConnectAsync`, `WriteAsync`, etc.) requires `.AsTask() |> Async.AwaitTask`. F# 9 does not have `Async.AwaitValueTask`, so explicit conversion is unavoidable
+- ❌ C# consumers cannot use the interface directly (acceptable since this is a pure F# project)
+
+### MessageResult + postProcess Pattern
+
+`MessageResult` (`{ State; ElectionAction; HeartbeatAction; PendingReads }`) is the universal return type for all handlers; `postProcess` applies it to `NodeContext`.
+
+**Rationale**: Before this pattern, `agentLoop` inlined timer handling, pending-read processing, and Config tracking between handler calls. Duplicated logic across message branches.
+
+**Trade-offs**:
+- ✅ `agentLoop` is now a pure dispatcher — match msg, call handler, `postProcess`, tail-call. No inline logic except Shutdown/GetState.
+- ✅ Adding a new message type requires only a new handler module + one line in `agentLoop`.
+- ✅ Timer mutation, Config tracking, and PendingRead processing are unified in one place (`postProcess`), not duplicated across branches.
+- ❌ `MessageResult` creation in each handler is slightly more verbose than directly mutating `ctx` fields.
+- ❌ `postProcess` is an additional indirection layer; understanding the full message lifecycle requires tracing through handler → `MessageResult` → `postProcess`.
+
+### TimerAction Declarative Timer Control
+
+`TimerAction` (`Keep | Reset | Stop`) replaced raw `System.Threading.Timer option` in `MessageResult`.
+
+**Rationale**: Previously, handlers created/reset/stopped timers directly and passed the resulting `Timer` references through `MessageResult`. Timer logic was scattered across all handler modules, and the timer's logical state (armed/disarmed) was implicit in the opaque `Timer` object.
+
+**Trade-offs**:
+- ✅ Timer mutations are centralized in `NodeTimer.applyElectionAction` / `applyHeartbeatAction`, called from `postProcess`. Handlers only declare *intent*.
+- ✅ `TimerAction` values are testable — can assert `ElectionAction = Reset` without needing real timers.
+- ✅ Adding a new timer action (e.g., `ResetWithInterval`) requires only adding a DU case and updating `apply*Action`.
+- ❌ Every handler must explicitly set both `ElectionAction` and `HeartbeatAction` (usually `Keep`), adding boilerplate.
+- ❌ Two-phase pattern (action → apply) is one more indirection than direct mutation.
+
+### Config Phase Recovery: LastConfigIndex Field
+
+`recoverConfigPhase` was changed from full-log scan (O(n)) to `Map.tryFind` lookup (O(log n)) by adding `LastConfigIndex: LogIndex` to `PersistentState`.
+
+**Rationale**: On restart, the old code scanned the entire log `Map` to find the last config change entry. As the log grows, this becomes unnecessary I/O.
+
+**Trade-offs**:
+- ✅ Recovery is O(log n) regardless of log size.
+- ✅ No legacy format support — `LastConfigIndex = 0` means `SinglePhase, config` with no scan.
+- ❌ New persisted field means state files from before this change lose the config phase on restart (acceptable: protocol catches up via RPC).
+- ❌ `takeSnapshot` must reset `LastConfigIndex` if the snapshot index exceeds it, adding complexity to the snapshot path.
+
+### Log.truncateAndAppend Optimization
+
+`truncateAndAppend` was rewritten from `Map.toSeq` + `Map.ofSeq` to a `Map.remove` loop.
+
+**Rationale**: The old approach serialized the entire log to a sequence (O(n)) and rebuilt a new map (O(k log k)). The new approach only removes conflicting entries (O(m log n)).
+
+**Trade-offs**:
+- ✅ Only the conflicting suffix is removed; the rest of the map is unchanged.
+- ✅ Same O(m log n) worst case as the old approach, but better constant factors when the conflict is near the end.
+- ❌ Slightly more code than the one-liner `Map.toSeq` + `Map.ofSeq`.

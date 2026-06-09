@@ -46,32 +46,32 @@ let ``NodeLocal.commitAndBroadcast persists state, calls apply, and returns fina
     Assert.Equal(leaderState.Persistent.Log.Count, result.Persistent.Log.Count)
 
 [<Fact>]
-let ``NodeLocal.handleLocalMessage processes wildcard via log warning`` () =
+let ``NodeLocal.dispatchLocalMessage processes wildcard via log warning`` () =
     let state = State.init dummyConfig None
     let ctx = makeTestContext state
 
-    let result = NodeLocal.handleLocalMessage ctx ElectionTimeout
+    let result = NodeLocal.dispatchLocalMessage ctx ElectionTimeout
 
     Assert.Equal(state, result)
     Assert.Equal(Follower, result.Role)
 
 [<Fact>]
-let ``NodeLocal.handleLocalMessage dispatches ClientCommand on Follower returns unchanged state`` () =
+let ``NodeLocal.dispatchLocalMessage dispatches ClientCommand on Follower returns unchanged state`` () =
     let state = State.init dummyConfig None
     let ctx = makeTestContext state
     Assert.Equal(Follower, ctx.State.Role)
 
-    let result = NodeLocal.handleLocalMessage ctx ElectionTimeout
+    let result = NodeLocal.dispatchLocalMessage ctx ElectionTimeout
     Assert.Equal(Follower, result.Role)
 
 [<Fact>]
-let ``NodeLocal.handleLocalMessage returns ctx.State for all wildcard messages`` () =
+let ``NodeLocal.dispatchLocalMessage returns ctx.State for all wildcard messages`` () =
     let state = State.init dummyConfig None
     let ctx = makeTestContext state
 
     [ ElectionTimeout; HeartbeatTimeout ]
     |> List.iter (fun msg ->
-        let result = NodeLocal.handleLocalMessage ctx msg
+        let result = NodeLocal.dispatchLocalMessage ctx msg
         Assert.Equal(state, result))
 
 [<Fact>]

@@ -88,13 +88,13 @@ module Transport =
         }
 
     let startListener config postMessage (ct: System.Threading.CancellationToken) =
-        task {
-            let listener =
-                new System.Net.Sockets.TcpListener(System.Net.IPAddress.Any, config.Port)
+        let listener =
+            new System.Net.Sockets.TcpListener(System.Net.IPAddress.Any, config.Port)
 
-            listener.Start()
-            log $"Listening on port {config.Port}."
+        listener.Start()
+        log $"Listening on port {config.Port}."
 
+        async {
             use _reg =
                 ct.Register(fun () ->
                     try
@@ -104,7 +104,7 @@ module Transport =
 
             try
                 while not ct.IsCancellationRequested do
-                    let! tcpClient = listener.AcceptTcpClientAsync()
+                    let! tcpClient = listener.AcceptTcpClientAsync() |> Async.AwaitTask
                     handleConnection tcpClient ct postMessage |> Async.Start
             with
             | :? System.ObjectDisposedException -> ()
@@ -125,16 +125,16 @@ module Transport =
         lenPrefix, bytes
 
     let sendMessage (peer: PeerInfo) msg =
-        task {
+        async {
             use cts = new System.Threading.CancellationTokenSource 3000
 
             try
                 use client = new System.Net.Sockets.TcpClient()
-                do! client.ConnectAsync(peer.Host, peer.Port, cts.Token)
+                do! client.ConnectAsync(peer.Host, peer.Port, cts.Token).AsTask() |> Async.AwaitTask
                 let lenPrefix, payload = serializeMessage msg |> buildFrame
                 use stream = client.GetStream()
-                do! stream.WriteAsync(lenPrefix, 0, lenPrefix.Length, cts.Token)
-                do! stream.WriteAsync(payload, 0, payload.Length, cts.Token)
+                do! stream.WriteAsync(lenPrefix, 0, lenPrefix.Length, cts.Token) |> Async.AwaitTask
+                do! stream.WriteAsync(payload, 0, payload.Length, cts.Token) |> Async.AwaitTask
             with
             | :? System.OperationCanceledException -> log $"Timeout connecting to {peer.Id} ({peer.Host}:{peer.Port})."
             | ex -> log $"Failed to send to {peer.Id}: {ex.Message}."

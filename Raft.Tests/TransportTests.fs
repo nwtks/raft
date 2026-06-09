@@ -12,8 +12,7 @@ let ``TcpTransport.SendMessage triggers listener callback with correct message o
     let tcs = System.Threading.Tasks.TaskCompletionSource<RaftMessage>()
     let postMessage msg = tcs.TrySetResult msg |> ignore
     let tcpTransport = TcpTransport() :> ITransport
-    tcpTransport.StartListener config postMessage cts.Token |> ignore
-
+    tcpTransport.StartListener config postMessage cts.Token |> Async.Start
     System.Threading.Thread.Sleep 500
 
     let reqVote =
@@ -23,7 +22,7 @@ let ``TcpTransport.SendMessage triggers listener callback with correct message o
           LastLogTerm = 0L }
 
     let msg = RequestVoteMsg reqVote
-    tcpTransport.SendMessage (dummyPeer port) msg |> ignore
+    tcpTransport.SendMessage (dummyPeer port) msg |> Async.RunSynchronously
     let received = tcs.Task.Wait(System.TimeSpan.FromSeconds 5.0)
     cts.Cancel()
     Assert.True(received, "Message was not received within timeout")

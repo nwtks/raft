@@ -13,6 +13,17 @@ type PendingRead =
       ReplyChannel: AsyncReplyChannel<ReadCommandResult>
       Responses: Set<NodeId> }
 
+type TimerAction =
+    | Keep
+    | Reset
+    | Stop
+
+type MessageResult =
+    { State: RaftState
+      ElectionAction: TimerAction
+      HeartbeatAction: TimerAction
+      PendingReads: PendingRead list }
+
 type NodeMessage =
     | RaftRPC of RaftMessage
     | ElectionTimeout
@@ -34,9 +45,9 @@ type ITransport =
         config: NodeConfig ->
         postMessage: (RaftMessage -> unit) ->
         ct: System.Threading.CancellationToken ->
-            System.Threading.Tasks.Task<unit>
+            Async<unit>
 
-    abstract member SendMessage: peer: PeerInfo -> msg: RaftMessage -> System.Threading.Tasks.Task<unit>
+    abstract member SendMessage: peer: PeerInfo -> msg: RaftMessage -> Async<unit>
 
 type NodeContext =
     { Config: NodeConfig

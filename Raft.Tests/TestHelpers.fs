@@ -15,11 +15,11 @@ type MockTransport() =
     interface ITransport with
         member _.SendMessage peer msg =
             messages.Add((peer, msg))
-            System.Threading.Tasks.Task.FromResult(())
+            async { return () }
 
         member _.StartListener _ postMessage _ =
             postMessageOpt <- Some postMessage
-            System.Threading.Tasks.Task.FromResult(())
+            async { return () }
 
 type MockPersistence() =
     let mutable stateOpt: PersistentState option = None

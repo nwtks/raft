@@ -23,6 +23,11 @@ module Persistence =
         System.IO.File.Move(tempFile, fileName, true)
 
     let load fileName =
+        let tempFile = fileName + ".tmp"
+
+        if System.IO.File.Exists tempFile then
+            System.IO.File.Delete tempFile
+
         if System.IO.File.Exists fileName then
             try
                 let json = System.IO.File.ReadAllText fileName

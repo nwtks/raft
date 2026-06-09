@@ -10,7 +10,8 @@ type PersistentState =
       VotedFor: NodeId option
       Log: Map<LogIndex, LogEntry>
       Snapshot: Snapshot option
-      SessionTable: Map<string, int64> }
+      SessionTable: Map<string, int64>
+      LastConfigIndex: LogIndex }
 
 type VolatileState =
     { CommitIndex: LogIndex
@@ -40,23 +41,19 @@ type IPersistence =
     abstract member Load: unit -> PersistentState option
 
 module State =
-    let recoverConfigPhase (log: Map<LogIndex, LogEntry>) config =
-        let latestChange =
-            log
-            |> Map.toSeq
-            |> Seq.choose (fun (_, entry) ->
-                if entry.Command.StartsWith ConfigChange.ConfigCommandPrefix then
-                    ConfigChange.parse entry.Command
-                else
-                    None)
-            |> Seq.tryLast
-
-        match latestChange with
-        | Some(JointChange(oldPeers, newPeers)) ->
-            let unionPeers = List.append oldPeers newPeers |> List.distinct
-            JointPhase(oldPeers, newPeers), { config with Peers = unionPeers }
-        | Some(FinalChange peers) -> SinglePhase, { config with Peers = peers }
-        | None -> SinglePhase, config
+    let recoverConfigPhase (log: Map<LogIndex, LogEntry>) config lastConfigIndex =
+        if lastConfigIndex > Log.initialLogIndex then
+            match Log.getEntry lastConfigIndex log with
+            | Some entry ->
+                match ConfigChange.parse entry.Command with
+                | Some(JointChange(oldPeers, newPeers)) ->
+                    let unionPeers = List.append oldPeers newPeers |> List.distinct
+                    JointPhase(oldPeers, newPeers), { config with Peers = unionPeers }
+                | Some(FinalChange peers) -> SinglePhase, { config with Peers = peers }
+                | None -> SinglePhase, config
+            | None -> SinglePhase, config
+        else
+            SinglePhase, config
 
     let init config loadedState =
         let persistent =
@@ -67,9 +64,11 @@ module State =
                   VotedFor = None
                   Log = Log.empty
                   Snapshot = None
-                  SessionTable = Map.empty }
+                  SessionTable = Map.empty
+                  LastConfigIndex = Log.initialLogIndex }
 
-        let configPhase, updatedConfig = recoverConfigPhase persistent.Log config
+        let configPhase, updatedConfig =
+            recoverConfigPhase persistent.Log config persistent.LastConfigIndex
 
         { Role = Follower
           Persistent = persistent
@@ -173,11 +172,18 @@ module State =
               LastIncludedTerm = lastTerm
               StateMachineData = data }
 
+        let lastConfigIndex =
+            if state.Persistent.LastConfigIndex > lastIndex then
+                state.Persistent.LastConfigIndex
+            else
+                Log.initialLogIndex
+
         { state with
             Persistent =
                 { state.Persistent with
                     Log = newLog
-                    Snapshot = Some snapshot }
+                    Snapshot = Some snapshot
+                    LastConfigIndex = lastConfigIndex }
             Volatile =
                 { state.Volatile with
                     CommitIndex = max state.Volatile.CommitIndex lastIndex
@@ -188,6 +194,12 @@ module State =
             Persistent =
                 { state.Persistent with
                     SessionTable = state.Persistent.SessionTable |> Map.add clientId seqNum } }
+
+    let updateLastConfigIndex index state =
+        { state with
+            Persistent =
+                { state.Persistent with
+                    LastConfigIndex = index } }
 
     let updateConfig peers state =
         { state with

@@ -4,7 +4,7 @@ open Xunit
 open Raft
 open TestHelpers
 
-let makeTestContext state : NodeContext =
+let makeTestContext state =
     let inbox = new MailboxProcessor<NodeMessage>(fun _ -> async { () })
 
     { Config = dummyConfig
@@ -21,10 +21,9 @@ let makeTestContext state : NodeContext =
       PendingReads = [] }
 
 [<Fact>]
-let ``NodeRaft.handleRaftRPCResult updates Config when state.Config differs from ctx.Config`` () =
+let ``NodeAgent.postProcess uses result State.Config when it differs from ctx.Config`` () =
     let state = State.init dummyConfig None
     let ctx = makeTestContext state
-
     Assert.Equal(ctx.Config, state.Config)
 
     let modifiedState =
@@ -33,33 +32,30 @@ let ``NodeRaft.handleRaftRPCResult updates Config when state.Config differs from
 
     Assert.NotEqual(ctx.Config, modifiedState.Config)
 
-    let rpcMsg =
-        RequestVoteMsg
-            { CandidateTerm = 1L
-              CandidateId = 2
-              LastLogIndex = 0L
-              LastLogTerm = 0L }
+    let result =
+        { State = modifiedState
+          ElectionAction = Keep
+          HeartbeatAction = Keep
+          PendingReads = [] }
 
-    let result = NodeRaft.handleRaftRPCResult ctx rpcMsg modifiedState None None
+    let newCtx = NodeAgent.postProcess ctx result
 
-    Assert.Equal(modifiedState.Config, result.Config)
-    Assert.Equal(modifiedState, result.State)
+    Assert.Equal(modifiedState.Config, newCtx.Config)
+    Assert.Equal(modifiedState, newCtx.State)
 
 [<Fact>]
-let ``NodeRaft.handleRaftRPCResult keeps original Config when state.Config equals ctx.Config`` () =
+let ``NodeAgent.postProcess keeps ctx.Config when result State.Config matches ctx.Config`` () =
     let state = State.init dummyConfig None
     let ctx = makeTestContext state
-
     Assert.Equal(ctx.Config, state.Config)
 
-    let rpcMsg =
-        RequestVoteMsg
-            { CandidateTerm = 1L
-              CandidateId = 2
-              LastLogIndex = 0L
-              LastLogTerm = 0L }
+    let result =
+        { State = state
+          ElectionAction = Keep
+          HeartbeatAction = Keep
+          PendingReads = [] }
 
-    let result = NodeRaft.handleRaftRPCResult ctx rpcMsg state None None
+    let newCtx = NodeAgent.postProcess ctx result
 
-    Assert.Equal(ctx.Config, result.Config)
-    Assert.Equal(state, result.State)
+    Assert.Equal(ctx.Config, newCtx.Config)
+    Assert.Equal(state, newCtx.State)
