@@ -46,7 +46,7 @@ let ``NodeLocal.commitAndBroadcast persists state, calls apply, and returns fina
     Assert.Equal(leaderState.Persistent.Log.Count, result.Persistent.Log.Count)
 
 [<Fact>]
-let ``NodeLocal.dispatchLocalMessage processes wildcard via log warning`` () =
+let ``NodeLocal.dispatchLocalMessage returns unchanged state for unrecognized message`` () =
     let state = State.init dummyConfig None
     let ctx = makeTestContext state
 
@@ -56,7 +56,7 @@ let ``NodeLocal.dispatchLocalMessage processes wildcard via log warning`` () =
     Assert.Equal(Follower, result.Role)
 
 [<Fact>]
-let ``NodeLocal.dispatchLocalMessage dispatches ClientCommand on Follower returns unchanged state`` () =
+let ``NodeLocal.dispatchLocalMessage returns unchanged state for ClientCommand on Follower`` () =
     let state = State.init dummyConfig None
     let ctx = makeTestContext state
     Assert.Equal(Follower, ctx.State.Role)
@@ -73,13 +73,3 @@ let ``NodeLocal.dispatchLocalMessage returns ctx.State for all wildcard messages
     |> List.iter (fun msg ->
         let result = NodeLocal.dispatchLocalMessage ctx msg
         Assert.Equal(state, result))
-
-[<Fact>]
-let ``NodeLocal handlers are accessible via module`` () =
-    let state = State.init dummyConfig None
-    Assert.Equal(Follower, state.Role)
-    Assert.Equal(dummyConfig, state.Config)
-
-    let leaderState = State.initLeaderState state
-    Assert.Equal(Leader, leaderState.Role)
-    Assert.Equal(Some dummyConfig.NodeId, leaderState.CurrentLeader)

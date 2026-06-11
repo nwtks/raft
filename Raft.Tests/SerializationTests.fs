@@ -50,6 +50,20 @@ let ``RequestVoteResponseMsg round-trips through JSON`` () =
     | _ -> Assert.Fail "Wrong message type"
 
 [<Fact>]
+let ``RequestVoteResponseMsg with VoteGranted=false round-trips`` () =
+    let original =
+        RequestVoteResponseMsg
+            { VoterId = 5
+              VoterTerm = 10L
+              VoteGranted = false }
+
+    let deserialized = roundTrip original
+
+    match deserialized with
+    | RequestVoteResponseMsg rvr -> Assert.False rvr.VoteGranted
+    | _ -> Assert.Fail "Wrong message type"
+
+[<Fact>]
 let ``AppendEntriesMsg round-trips through JSON`` () =
     let original =
         AppendEntriesMsg
@@ -182,21 +196,63 @@ let ``InstallSnapshotResponseMsg round-trips through JSON`` () =
     | _ -> Assert.Fail "Wrong message type"
 
 [<Fact>]
-let ``RequestVoteResponseMsg with VoteGranted=false round-trips`` () =
+let ``OptionConverter serializes None as null`` () =
     let original =
-        RequestVoteResponseMsg
-            { VoterId = 5
-              VoterTerm = 10L
-              VoteGranted = false }
+        RequestVoteMsg
+            { CandidateTerm = 42L
+              CandidateId = 7
+              LastLogIndex = 100L
+              LastLogTerm = 41L }
 
     let deserialized = roundTrip original
 
     match deserialized with
-    | RequestVoteResponseMsg rvr -> Assert.False rvr.VoteGranted
+    | RequestVoteMsg rv ->
+        Assert.Equal(42L, rv.CandidateTerm)
+        Assert.Equal(7, rv.CandidateId)
+        Assert.Equal(100L, rv.LastLogIndex)
+        Assert.Equal(41L, rv.LastLogTerm)
     | _ -> Assert.Fail "Wrong message type"
 
 [<Fact>]
-let ``Deserializing invalid case name throws`` () =
+let ``OptionConverter serializes and deserializes None`` () =
+    let value: int option = None
+    let json = System.Text.Json.JsonSerializer.Serialize(value, jsonOptions)
+    Assert.Equal("null", json)
+
+    let deserialized: int option =
+        System.Text.Json.JsonSerializer.Deserialize<int option>("null", jsonOptions)
+
+    Assert.True deserialized.IsNone
+
+    let rtValue: int option = None
+    let rtJson = System.Text.Json.JsonSerializer.Serialize(rtValue, jsonOptions)
+
+    let rtDeserialized: int option =
+        System.Text.Json.JsonSerializer.Deserialize<int option>(rtJson, jsonOptions)
+
+    Assert.Equal(None, rtDeserialized)
+
+[<Fact>]
+let ``OptionConverter round-trips Some string and numeric values`` () =
+    let value: string option = Some "hello"
+    let json = System.Text.Json.JsonSerializer.Serialize(value, jsonOptions)
+
+    let deserialized: string option =
+        System.Text.Json.JsonSerializer.Deserialize<string option>(json, jsonOptions)
+
+    Assert.Equal(Some "hello", deserialized)
+
+    let valueN: int64 option = Some 42L
+    let jsonN = System.Text.Json.JsonSerializer.Serialize(valueN, jsonOptions)
+
+    let deserializedN: int64 option =
+        System.Text.Json.JsonSerializer.Deserialize<int64 option>(jsonN, jsonOptions)
+
+    Assert.Equal(Some 42L, deserializedN)
+
+[<Fact>]
+let ``Deserializing invalid case name throws JsonException`` () =
     let badJson = """{"Case":"NonExistentMsg","Fields":[]}"""
 
     let ex =
@@ -205,46 +261,3 @@ let ``Deserializing invalid case name throws`` () =
             |> ignore)
 
     Assert.Contains("Unknown message case", ex.Message)
-
-[<Fact>]
-let ``OptionConverter serializes None as null`` () =
-    let value: int option = None
-    let json = System.Text.Json.JsonSerializer.Serialize(value, jsonOptions)
-    Assert.Equal("null", json)
-
-[<Fact>]
-let ``OptionConverter deserializes null as None`` () =
-    let value =
-        System.Text.Json.JsonSerializer.Deserialize<int option>("null", jsonOptions)
-
-    Assert.True value.IsNone
-
-[<Fact>]
-let ``OptionConverter round-trips Some value`` () =
-    let value: string option = Some "hello"
-    let json = System.Text.Json.JsonSerializer.Serialize(value, jsonOptions)
-
-    let deserialized =
-        System.Text.Json.JsonSerializer.Deserialize<string option>(json, jsonOptions)
-
-    Assert.Equal(Some "hello", deserialized)
-
-[<Fact>]
-let ``OptionConverter round-trips Some numeric value`` () =
-    let value: int64 option = Some 42L
-    let json = System.Text.Json.JsonSerializer.Serialize(value, jsonOptions)
-
-    let deserialized =
-        System.Text.Json.JsonSerializer.Deserialize<int64 option>(json, jsonOptions)
-
-    Assert.Equal(Some 42L, deserialized)
-
-[<Fact>]
-let ``OptionConverter round-trips None through JSON`` () =
-    let value: int option = None
-    let json = System.Text.Json.JsonSerializer.Serialize(value, jsonOptions)
-
-    let deserialized =
-        System.Text.Json.JsonSerializer.Deserialize<int option>(json, jsonOptions)
-
-    Assert.Equal(None, deserialized)

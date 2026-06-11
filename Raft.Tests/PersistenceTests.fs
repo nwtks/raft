@@ -7,33 +7,7 @@ open TestHelpers
 let getTestNodeId () = System.Random().Next(10000, 99999)
 
 [<Fact>]
-let ``FilePersistence.Load returns None when state file does not exist`` () =
-    let nodeId = getTestNodeId ()
-    let persistence = FilePersistence nodeId :> IPersistence
-    let fileName = sprintf "state_%d.json" nodeId
-
-    if System.IO.File.Exists fileName then
-        System.IO.File.Delete fileName
-
-    let result = persistence.Load()
-    Assert.True result.IsNone
-
-[<Fact>]
-let ``FilePersistence.Load returns None for corrupted JSON file`` () =
-    let nodeId = getTestNodeId ()
-    let persistence = FilePersistence nodeId :> IPersistence
-    let fileName = sprintf "state_%d.json" nodeId
-
-    try
-        System.IO.File.WriteAllText(fileName, "this is not valid JSON")
-        let result = persistence.Load()
-        Assert.True result.IsNone
-    finally
-        if System.IO.File.Exists fileName then
-            System.IO.File.Delete fileName
-
-[<Fact>]
-let ``FilePersistence.Save serializes and Load deserializes state correctly`` () =
+let ``FilePersistence.Save and Load round-trip state`` () =
     let nodeId = getTestNodeId ()
     let persistence = FilePersistence nodeId :> IPersistence
     let fileName = sprintf "state_%d.json" nodeId
@@ -107,6 +81,32 @@ let ``FilePersistence.Save overwrites previously saved state with new state`` ()
         let loadedState = loadedStateOpt.Value
         Assert.Equal(2L, loadedState.CurrentTerm)
         Assert.Equal(Some 5, loadedState.VotedFor)
+    finally
+        if System.IO.File.Exists fileName then
+            System.IO.File.Delete fileName
+
+[<Fact>]
+let ``FilePersistence.Load returns None when state file does not exist`` () =
+    let nodeId = getTestNodeId ()
+    let persistence = FilePersistence nodeId :> IPersistence
+    let fileName = sprintf "state_%d.json" nodeId
+
+    if System.IO.File.Exists fileName then
+        System.IO.File.Delete fileName
+
+    let result = persistence.Load()
+    Assert.True result.IsNone
+
+[<Fact>]
+let ``FilePersistence.Load returns None for corrupted JSON file`` () =
+    let nodeId = getTestNodeId ()
+    let persistence = FilePersistence nodeId :> IPersistence
+    let fileName = sprintf "state_%d.json" nodeId
+
+    try
+        System.IO.File.WriteAllText(fileName, "this is not valid JSON")
+        let result = persistence.Load()
+        Assert.True result.IsNone
     finally
         if System.IO.File.Exists fileName then
             System.IO.File.Delete fileName

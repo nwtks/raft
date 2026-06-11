@@ -16,26 +16,31 @@ let ``Log.getEntry returns None for missing index`` () =
     Assert.True(Log.getEntry 99L log |> Option.isNone)
 
 [<Fact>]
-let ``Log.termAt returns 0 for missing index`` () =
+let ``Log.termAt returns 0 for non-existent index`` () =
     let log = logFromList [ createEntry 1L 1L "a" ]
     Assert.Equal(0L, Log.termAt 2L log)
 
-[<Fact>]
-let ``Log.lastIndexOfTerm returns None when term not found`` () =
-    let log = logFromList [ createEntry 1L 1L "a"; createEntry 2L 1L "b" ]
-    let result = Log.lastIndexOfTerm 2L log
-    Assert.True result.IsNone
-
-[<Fact>]
-let ``Log.lastIndexOfTerm returns correct index when term is found`` () =
+[<Theory>]
+[<InlineData("1:1,2:1", 2L, -1L)>] // term 2 not found → None
+[<InlineData("1:1,2:1,3:2", 1L, 2L)>] // term 1 found at index 2
+let ``Log.lastIndexOfTerm returns last index for given term`` (logSpec: string, searchTerm: int64, expected: int64) =
     let log =
-        logFromList [ createEntry 1L 1L "a"; createEntry 2L 1L "b"; createEntry 3L 2L "c" ]
+        logSpec.Split(',')
+        |> Array.map (fun s ->
+            let parts = s.Split(':')
+            createEntry (int64 parts.[0]) (int64 parts.[1]) "x")
+        |> Array.toList
+        |> logFromList
 
-    let result = Log.lastIndexOfTerm 1L log
-    Assert.Equal(Some 2L, result)
+    let result = Log.lastIndexOfTerm searchTerm log
+
+    if expected = -1L then
+        Assert.True result.IsNone
+    else
+        Assert.Equal(Some expected, result)
 
 [<Fact>]
-let ``Log.entriesFrom returns entries at and after given index`` () =
+let ``Log.entriesFrom returns entries from given index onward`` () =
     let log =
         logFromList [ createEntry 1L 1L "a"; createEntry 2L 1L "b"; createEntry 3L 1L "c" ]
 
@@ -61,7 +66,7 @@ let ``Log.createEntry uses next sequential index`` () =
     Assert.Equal(Some 99L, entry.SeqNum)
 
 [<Fact>]
-let ``Log.append adds entry and returns incremented lastIndex`` () =
+let ``Log.append adds entry and updates lastIndex`` () =
     let log = Log.empty |> Log.append 1L "cmd1"
     Assert.Equal(1L, Log.lastIndex log)
     Assert.Equal(1L, Log.lastTerm log)
@@ -82,7 +87,7 @@ let ``Log.appendWithSession creates entry with clientId and seqNum`` () =
     Assert.Equal(Some 42L, entry.Value.SeqNum)
 
 [<Fact>]
-let ``Log.appendWithSession increments index correctly`` () =
+let ``Log.appendWithSession increments lastIndex`` () =
     let log =
         Log.empty
         |> Log.append 1L "cmd1"
@@ -117,63 +122,33 @@ let ``Log.appendEntriesToLog adds multiple entries in batch`` () =
     Assert.Equal("c", (Log.getEntry 3L merged).Value.Command)
 
 
-[<Fact>]
-let ``Log.mergeEntries appends new entries when no conflict exists`` () =
-    let log = logFromList [ createEntry 1L 1L "cmd1" ]
-    let newEntries = [ createEntry 2L 1L "cmd2" ]
+[<Theory>]
+[<InlineData("1:1:cmd1", "2:1:cmd2", 2, 2L, 1L)>] // append new entries
+[<InlineData("1:1:cmd1,2:1:cmd2,3:1:cmd3", "2:2:new_cmd2,3:2:new_cmd3", 3, 3L, 2L)>] // truncate and replace
+[<InlineData("1:1:cmd1", "", 1, 1L, 1L)>] // empty new entries → unchanged
+[<InlineData("", "1:1:a,2:1:b", 2, 2L, 1L)>] // empty log → add all
+[<InlineData("1:1:a,2:1:b", "1:1:a,2:1:b", 2, 2L, 1L)>] // exact match → no duplicate
+[<InlineData("1:1:old_a,2:1:old_b,3:2:old_c", "1:3:new_a,2:3:new_b", 2, 2L, 3L)>] // conflict at first entry
+let ``Log.mergeEntries merges incoming entries over existing log``
+    (logSpec: string, newEntriesSpec: string, expectedCount: int, expectedLastIndex: int64, expectedLastTerm: int64)
+    =
+    let parse spec =
+        if spec = "" then
+            []
+        else
+            spec.Split(',')
+            |> Array.map (fun s ->
+                let parts = s.Split(':')
+                createEntry (int64 parts.[0]) (int64 parts.[1]) parts.[2])
+            |> Array.toList
 
-    let merged = Log.mergeEntries newEntries log
-    Assert.Equal(2, merged.Count)
-    Assert.Equal(2L, Log.lastIndex merged)
-
-[<Fact>]
-let ``Log.mergeEntries truncates conflicting entries and replaces with leader entries`` () =
-    let log =
-        logFromList [ createEntry 1L 1L "cmd1"; createEntry 2L 1L "cmd2"; createEntry 3L 1L "cmd3" ]
-
-    let newEntries = [ createEntry 2L 2L "new_cmd2"; createEntry 3L 2L "new_cmd3" ]
-
-    let merged = Log.mergeEntries newEntries log
-    Assert.Equal(3, merged.Count)
-    Assert.Equal(2L, (Log.getEntry 2L merged).Value.Term)
-    Assert.Equal("new_cmd2", (Log.getEntry 2L merged).Value.Command)
-
-[<Fact>]
-let ``Log.mergeEntries with empty entries returns original log unchanged`` () =
-    let log = logFromList [ createEntry 1L 1L "cmd1" ]
-    let merged = Log.mergeEntries [] log
-    Assert.Equal(1, merged.Count)
-    Assert.Equal(1L, Log.lastIndex merged)
-
-[<Fact>]
-let ``Log.mergeEntries into empty log adds all entries`` () =
-    let newEntries = [ createEntry 1L 1L "a"; createEntry 2L 1L "b" ]
-    let merged = Log.mergeEntries newEntries Map.empty
-    Assert.Equal(2, merged.Count)
-    Assert.Equal(2L, Log.lastIndex merged)
-
-[<Fact>]
-let ``Log.mergeEntries with exact matching entries does not duplicate`` () =
-    let log = logFromList [ createEntry 1L 1L "a"; createEntry 2L 1L "b" ]
-    let newEntries = [ createEntry 1L 1L "a"; createEntry 2L 1L "b" ]
-    let merged = Log.mergeEntries newEntries log
-    Assert.Equal(2, merged.Count)
-
-[<Fact>]
-let ``Log.mergeEntries with conflict at first entry truncates everything`` () =
-    let log =
-        logFromList
-            [ createEntry 1L 1L "old_a"
-              createEntry 2L 1L "old_b"
-              createEntry 3L 2L "old_c" ]
-
-    let newEntries = [ createEntry 1L 3L "new_a"; createEntry 2L 3L "new_b" ]
+    let log = logFromList (parse logSpec)
+    let newEntries = parse newEntriesSpec
     let merged = Log.mergeEntries newEntries log
 
-    Assert.Equal(2, merged.Count)
-    Assert.Equal(3L, merged.[1L].Term)
-    Assert.Equal("new_a", merged.[1L].Command)
-    Assert.Equal("new_b", merged.[2L].Command)
+    Assert.Equal(expectedCount, merged.Count)
+    Assert.Equal(expectedLastIndex, Log.lastIndex merged)
+    Assert.Equal(expectedLastTerm, Log.lastTerm merged)
 
 [<Fact>]
 let ``Log.trim removes entries at or below lastIncludedIndex and adds sentinel`` () =

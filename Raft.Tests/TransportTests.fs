@@ -5,7 +5,7 @@ open Raft
 open TestHelpers
 
 [<Fact>]
-let ``TcpTransport.SendMessage triggers listener callback with correct message on loopback`` () =
+let ``TcpTransport.SendMessage triggers listener callback with message on loopback`` () =
     let port = 15001
     let config = dummyConfigWithPort port
     let cts = new System.Threading.CancellationTokenSource()

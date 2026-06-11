@@ -37,7 +37,7 @@ let ``ConfigChange.serialize FinalChange produces tagged JSON with t=f`` () =
     Assert.Contains("\"p\"", json)
 
 [<Fact>]
-let ``ConfigChange.parseArray parses legacy plain JSON array format`` () =
+let ``ConfigChange.parseArray parses legacy JSON array peer format`` () =
     let json =
         """[{"Id":1,"Host":"127.0.0.1","Port":5001},{"Id":2,"Host":"127.0.0.1","Port":5002}]"""
 

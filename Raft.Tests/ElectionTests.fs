@@ -5,7 +5,7 @@ open Raft
 open TestHelpers
 
 [<Fact>]
-let ``Election.startElection transitions node to Candidate, increments term, and votes for self`` () =
+let ``Election.startElection transitions to Candidate with incremented term and self-vote`` () =
     let state = State.init dummyConfig None
     Assert.Equal(Follower, state.Role)
     Assert.Equal(0L, state.Persistent.CurrentTerm)
@@ -33,135 +33,75 @@ let ``Election.startElection increments term from non-zero term`` () =
     Assert.Equal(6L, newState.Persistent.CurrentTerm)
     Assert.Equal(Some 1, newState.Persistent.VotedFor)
 
-[<Fact>]
-let ``Election.handleRequestVote grants vote when candidate term is higher and log is up-to-date`` () =
-    let state = State.init dummyConfig None
+[<Theory>]
+[<InlineData(0L, -1, 1L, 2, 0L, 0L, false, true, 1L, 2)>] // higher term, up-to-date log → grant
+[<InlineData(2L, -1, 1L, 2, 0L, 0L, false, false, 2L, -1)>] // lower term → reject
+[<InlineData(1L, 2, 1L, 2, 0L, 0L, false, true, 1L, 2)>] // same term, voted same candidate → grant
+[<InlineData(1L, -1, 2L, 2, 1L, 0L, true, false, 2L, -1)>] // candidate log behind → reject
+[<InlineData(1L, 3, 1L, 2, 0L, 0L, false, false, 1L, 3)>] // voted different candidate → reject
+[<InlineData(3L, -1, 3L, 2, 0L, 0L, false, true, 3L, 2)>] // equal term, not voted → grant
+let ``Election.handleRequestVote grants vote to candidate with up-to-date log``
+    (
+        currentTerm: int64,
+        votedFor: int,
+        candidateTerm: int64,
+        candidateId: int,
+        lastLogIndex: int64,
+        lastLogTerm: int64,
+        hasLogEntry: bool,
+        expectedGrant: bool,
+        expectedTerm: int64,
+        expectedVotedFor: int
+    ) =
+    let votedForOpt = if votedFor = -1 then None else Some votedFor
+
+    let log =
+        if hasLogEntry then
+            logFromList [ createEntry 1L 1L "x" ]
+        else
+            Map.empty
+
+    let state =
+        { State.init dummyConfig None with
+            Persistent =
+                { CurrentTerm = currentTerm
+                  VotedFor = votedForOpt
+                  Log = log
+                  Snapshot = None
+                  SessionTable = Map.empty
+                  LastConfigIndex = 0L } }
 
     let rv =
-        { CandidateTerm = 1L
-          CandidateId = 2
-          LastLogIndex = 0L
-          LastLogTerm = 0L }
+        { CandidateTerm = candidateTerm
+          CandidateId = candidateId
+          LastLogIndex = lastLogIndex
+          LastLogTerm = lastLogTerm }
 
     let newState, resp = Election.handleRequestVote rv state
-    Assert.True resp.VoteGranted
-    Assert.Equal(1L, resp.VoterTerm)
-    Assert.Equal(Some 2, newState.Persistent.VotedFor)
+    Assert.Equal(expectedGrant, resp.VoteGranted)
+    Assert.Equal(expectedTerm, resp.VoterTerm)
+
+    let expectedVotedForOpt =
+        if expectedVotedFor = -1 then
+            None
+        else
+            Some expectedVotedFor
+
+    Assert.Equal(expectedVotedForOpt, newState.Persistent.VotedFor)
 
 [<Fact>]
-let ``Election.handleRequestVote rejects vote when candidate term is lower than current term`` () =
-    let state =
-        { State.init dummyConfig None with
-            Persistent =
-                { CurrentTerm = 2L
-                  VotedFor = None
-                  Log = Map.empty
-                  Snapshot = None
-                  SessionTable = Map.empty
-                  LastConfigIndex = 0L } }
+let ``Election.handleVoteResponse promotes node to Leader upon receiving majority votes`` () =
+    let state = Election.startElection (State.init dummyConfig None)
 
-    let rv =
-        { CandidateTerm = 1L
-          CandidateId = 2
-          LastLogIndex = 0L
-          LastLogTerm = 0L }
+    let resp =
+        { VoterId = 2
+          VoterTerm = 1L
+          VoteGranted = true }
 
-    let newState, resp = Election.handleRequestVote rv state
-    Assert.False resp.VoteGranted
-    Assert.Equal(2L, resp.VoterTerm)
-    Assert.Equal(None, newState.Persistent.VotedFor)
-
-[<Fact>]
-let ``Election.handleRequestVote grants vote again when already voted for the same candidate`` () =
-    let state =
-        { State.init dummyConfig None with
-            Persistent =
-                { CurrentTerm = 1L
-                  VotedFor = Some 2
-                  Log = Map.empty
-                  Snapshot = None
-                  SessionTable = Map.empty
-                  LastConfigIndex = 0L } }
-
-    let rv =
-        { CandidateTerm = 1L
-          CandidateId = 2
-          LastLogIndex = 0L
-          LastLogTerm = 0L }
-
-    let _, resp = Election.handleRequestVote rv state
-    Assert.True resp.VoteGranted
-
-[<Fact>]
-let ``Election.handleRequestVote rejects when candidate log is behind`` () =
-    let state =
-        { State.init dummyConfig None with
-            Persistent =
-                { CurrentTerm = 1L
-                  VotedFor = None
-                  Log =
-                    logFromList
-                        [ { Index = 1L
-                            Term = 1L
-                            Command = "x"
-                            ClientId = None
-                            SeqNum = None } ]
-                  Snapshot = None
-                  SessionTable = Map.empty
-                  LastConfigIndex = 0L } }
-
-    let rv =
-        { CandidateTerm = 2L
-          CandidateId = 2
-          LastLogIndex = 1L
-          LastLogTerm = 0L }
-
-    let _, resp = Election.handleRequestVote rv state
-    Assert.False resp.VoteGranted
-
-[<Fact>]
-let ``Election.handleRequestVote rejects when already voted for different candidate in same term`` () =
-    let state =
-        { State.init dummyConfig None with
-            Persistent =
-                { CurrentTerm = 1L
-                  VotedFor = Some 3
-                  Log = Map.empty
-                  Snapshot = None
-                  SessionTable = Map.empty
-                  LastConfigIndex = 0L } }
-
-    let rv =
-        { CandidateTerm = 1L
-          CandidateId = 2
-          LastLogIndex = 0L
-          LastLogTerm = 0L }
-
-    let _, resp = Election.handleRequestVote rv state
-    Assert.False resp.VoteGranted
-    Assert.Equal(1L, resp.VoterTerm)
-
-[<Fact>]
-let ``Election.handleRequestVote grants vote when candidate term equals current term and not voted`` () =
-    let state =
-        { State.init dummyConfig None with
-            Persistent =
-                { CurrentTerm = 3L
-                  VotedFor = None
-                  Log = Map.empty
-                  Snapshot = None
-                  SessionTable = Map.empty
-                  LastConfigIndex = 0L } }
-
-    let rv =
-        { CandidateTerm = 3L
-          CandidateId = 2
-          LastLogIndex = 0L
-          LastLogTerm = 0L }
-
-    let _, resp = Election.handleRequestVote rv state
-    Assert.True resp.VoteGranted
-    Assert.Equal(3L, resp.VoterTerm)
+    let newState = Election.handleVoteResponse 2 resp state
+    Assert.Equal(Leader, newState.Role)
+    Assert.True newState.LeaderState.IsSome
+    Assert.Equal(Some 1, newState.CurrentLeader)
 
 [<Fact>]
 let ``Election.handleVoteResponse updates current term when response carries a higher term`` () =
@@ -201,33 +141,6 @@ let ``Election.handleVoteResponse records vote but stays Candidate without major
     Assert.True(newState.LeaderState.IsNone)
 
 [<Fact>]
-let ``Election.handleVoteResponse promotes node to Leader upon receiving majority votes`` () =
-    let state = Election.startElection (State.init dummyConfig None)
-
-    let resp =
-        { VoterId = 2
-          VoterTerm = 1L
-          VoteGranted = true }
-
-    let newState = Election.handleVoteResponse 2 resp state
-    Assert.Equal(Leader, newState.Role)
-    Assert.True newState.LeaderState.IsSome
-    Assert.Equal(Some 1, newState.CurrentLeader)
-
-[<Fact>]
-let ``Election.handleVoteResponse is no-op when node is Follower (not Candidate)`` () =
-    let state = State.init dummyConfig None
-
-    let resp =
-        { VoterId = 2
-          VoterTerm = 0L
-          VoteGranted = true }
-
-    let newState = Election.handleVoteResponse 2 resp state
-    Assert.Equal(Follower, newState.Role)
-    Assert.Equal(state, newState)
-
-[<Fact>]
 let ``Election.handleVoteResponse ignores denied vote when staying Candidate without majority`` () =
     let config5Nodes =
         { dummyConfig with
@@ -263,3 +176,16 @@ let ``Election.handleVoteResponse ignores duplicate vote from already-voted node
     let afterDup = Election.handleVoteResponse 2 resp afterFirst
     Assert.Equal(Leader, afterDup.Role)
     Assert.Equal(afterFirst, afterDup)
+
+[<Fact>]
+let ``Election.handleVoteResponse is no-op when node is Follower (not Candidate)`` () =
+    let state = State.init dummyConfig None
+
+    let resp =
+        { VoterId = 2
+          VoterTerm = 0L
+          VoteGranted = true }
+
+    let newState = Election.handleVoteResponse 2 resp state
+    Assert.Equal(Follower, newState.Role)
+    Assert.Equal(state, newState)

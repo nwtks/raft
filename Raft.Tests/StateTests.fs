@@ -5,7 +5,7 @@ open Raft
 open TestHelpers
 
 [<Fact>]
-let ``State.recoverConfigPhase detects JointPhase from log`` () =
+let ``State.recoverConfigPhase returns JointPhase when log contains JointChange entry`` () =
     let oldPeers = dummyConfig.Peers
     let newPeers = [ { Id = 4; Host = ""; Port = 0 }; { Id = 5; Host = ""; Port = 0 } ]
     let serialized = ConfigChange.serialize (JointChange(oldPeers, newPeers))
@@ -28,7 +28,7 @@ let ``State.recoverConfigPhase detects JointPhase from log`` () =
     | _ -> Assert.Fail "Expected JointPhase"
 
 [<Fact>]
-let ``State.recoverConfigPhase detects FinalChange from log`` () =
+let ``State.recoverConfigPhase returns SinglePhase when log contains FinalChange entry`` () =
     let newPeers = [ { Id = 4; Host = ""; Port = 0 }; { Id = 5; Host = ""; Port = 0 } ]
     let serialized = ConfigChange.serialize (FinalChange newPeers)
     let command = ConfigChange.ConfigCommandPrefix + serialized
@@ -56,7 +56,7 @@ let ``State.recoverConfigPhase returns SinglePhase when no config entries in log
     Assert.Equal(dummyConfig.Peers.Length, updatedConfig.Peers.Length)
 
 [<Fact>]
-let ``State.recoverConfigPhase picks latest config change from multiple entries`` () =
+let ``State.recoverConfigPhase uses latest config change when multiple entries exist`` () =
     let finalPeers = [ { Id = 6; Host = ""; Port = 0 } ]
 
     let finalCmd =
@@ -89,7 +89,7 @@ let ``State.recoverConfigPhase picks latest config change from multiple entries`
     Assert.Equal(6, updatedConfig.Peers.[0].Id)
 
 [<Fact>]
-let ``State.init without persisted state creates default PersistentState with term 0`` () =
+let ``State.init without persisted state returns term 0 and Follower role`` () =
     let state = State.init dummyConfigStandalone None
 
     Assert.Equal(Follower, state.Role)
@@ -100,7 +100,7 @@ let ``State.init without persisted state creates default PersistentState with te
     Assert.Equal(0L, state.Volatile.LastApplied)
 
 [<Fact>]
-let ``State.init with persisted state restores CurrentTerm, VotedFor, and Log correctly`` () =
+let ``State.init with persisted state restores CurrentTerm, VotedFor, and Log`` () =
     let loaded: PersistentState =
         { CurrentTerm = 5L
           VotedFor = Some 2
@@ -127,6 +127,16 @@ let ``State.init with persisted state restores CurrentTerm, VotedFor, and Log co
     Assert.True state.LeaderState.IsNone
 
 [<Fact>]
+let ``State.init sets Follower role; initLeaderState sets Leader role and current leader`` () =
+    let state = State.init dummyConfig None
+    Assert.Equal(Follower, state.Role)
+    Assert.Equal(dummyConfig, state.Config)
+
+    let leaderState = State.initLeaderState state
+    Assert.Equal(Leader, leaderState.Role)
+    Assert.Equal(Some dummyConfig.NodeId, leaderState.CurrentLeader)
+
+[<Fact>]
 let ``State.initLeaderState creates correct NextIndex and MatchIndex for all peers`` () =
     let state = State.init dummyConfig None
     let leaderState = State.initLeaderState state
@@ -142,7 +152,7 @@ let ``State.initLeaderState creates correct NextIndex and MatchIndex for all pee
         Assert.Equal(0L, ls.MatchIndex.[p.Id])
 
 [<Fact>]
-let ``State.updateTerm resets to Follower when new term is higher`` () =
+let ``State.updateTerm resets role to Follower on higher term`` () =
     let state = State.init dummyConfig None
     let leader = State.initLeaderState state
 
@@ -173,7 +183,7 @@ let ``State.updateLogAndCommit updates both log and commit index`` () =
     Assert.Equal(0L, updated.Volatile.LastApplied)
 
 [<Fact>]
-let ``State.updateCommitIndex only updates commit index`` () =
+let ``State.updateCommitIndex sets CommitIndex without changing LastApplied`` () =
     let state = State.init dummyConfig None
     let updated = State.updateCommitIndex 5L state
 
@@ -181,7 +191,7 @@ let ``State.updateCommitIndex only updates commit index`` () =
     Assert.Equal(0L, updated.Volatile.LastApplied)
 
 [<Fact>]
-let ``State.updateLastApplied only updates last applied`` () =
+let ``State.updateLastApplied sets LastApplied without changing CommitIndex`` () =
     let state = State.init dummyConfig None
     let updated = State.updateLastApplied 3L state
 
@@ -189,7 +199,7 @@ let ``State.updateLastApplied only updates last applied`` () =
     Assert.Equal(0L, updated.Volatile.CommitIndex)
 
 [<Fact>]
-let ``State.followLeader updates role to Follower and records leader`` () =
+let ``State.followLeader sets Follower role and records leader ID`` () =
     let state = State.init dummyConfig None
     let updated = State.followLeader 3L 2 state
 
@@ -226,7 +236,7 @@ let ``State.updateLeaderState is no-op when LeaderState is None`` () =
     Assert.Equal(state, updated)
 
 [<Fact>]
-let ``State.recordVote updates VotedFor`` () =
+let ``State.recordVote sets VotedFor to candidate ID`` () =
     let state = State.init dummyConfig None
     Assert.Equal(None, state.Persistent.VotedFor)
 
@@ -364,20 +374,6 @@ let ``State.enterJointConsensus sets JointPhase and union peers`` () =
     Assert.Equal(4, updated.Config.Peers.Length)
 
 [<Fact>]
-let ``State.exitJointConsensus sets SinglePhase and updates peers to new list`` () =
-    let oldPeers = dummyConfig.Peers
-    let newPeers = [ { Id = 4; Host = ""; Port = 0 }; { Id = 5; Host = ""; Port = 0 } ]
-
-    let state =
-        State.enterJointConsensus oldPeers newPeers (State.init dummyConfig None)
-
-    let updated = State.exitJointConsensus newPeers state
-    Assert.Equal(SinglePhase, updated.ConfigPhase)
-    Assert.Equal(2, updated.Config.Peers.Length)
-    Assert.Equal(4, updated.Config.Peers.[0].Id)
-    Assert.Equal(5, updated.Config.Peers.[1].Id)
-
-[<Fact>]
 let ``State.exitJointConsensus keeps leader when leader remains in config`` () =
     let state = State.initLeaderState (State.init dummyConfig None)
     Assert.Equal(Leader, state.Role)
@@ -396,6 +392,20 @@ let ``State.exitJointConsensus keeps leader when leader remains in config`` () =
     Assert.Equal(Leader, updated.Role)
     Assert.Equal(SinglePhase, updated.ConfigPhase)
     Assert.Equal(2, updated.Config.Peers.Length)
+
+[<Fact>]
+let ``State.exitJointConsensus sets SinglePhase and updates peers to new list`` () =
+    let oldPeers = dummyConfig.Peers
+    let newPeers = [ { Id = 4; Host = ""; Port = 0 }; { Id = 5; Host = ""; Port = 0 } ]
+
+    let state =
+        State.enterJointConsensus oldPeers newPeers (State.init dummyConfig None)
+
+    let updated = State.exitJointConsensus newPeers state
+    Assert.Equal(SinglePhase, updated.ConfigPhase)
+    Assert.Equal(2, updated.Config.Peers.Length)
+    Assert.Equal(4, updated.Config.Peers.[0].Id)
+    Assert.Equal(5, updated.Config.Peers.[1].Id)
 
 [<Fact>]
 let ``State.exitJointConsensus steps down leader when leader is removed from config`` () =

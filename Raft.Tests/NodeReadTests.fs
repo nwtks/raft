@@ -5,6 +5,22 @@ open Raft
 open TestHelpers
 
 [<Fact>]
+let ``NodeRead.canServePendingRead returns true when leader has committed entry in current term with quorum`` () =
+    let mutable state =
+        State.initLeaderState (State.updateTerm 1L (State.init dummyConfig None))
+
+    state <-
+        { state with
+            Volatile = { state.Volatile with CommitIndex = 1L } }
+
+    let pendingRead: PendingRead =
+        { ReadIndex = 1L
+          ReplyChannel = Unchecked.defaultof<_>
+          Responses = Set.ofList [ 1; 2; 3 ] }
+
+    Assert.True(NodeRead.canServePendingRead state pendingRead)
+
+[<Fact>]
 let ``NodeRead.canServePendingRead returns false when node is not leader`` () =
     let state = State.init dummyConfig None
 
@@ -16,7 +32,7 @@ let ``NodeRead.canServePendingRead returns false when node is not leader`` () =
     Assert.False(NodeRead.canServePendingRead state pendingRead)
 
 [<Fact>]
-let ``NodeRead.canServePendingRead returns false when CommitIndex is 0`` () =
+let ``NodeRead.canServePendingRead returns false when commit index is 0`` () =
     let state = State.initLeaderState (State.init dummyConfig None)
 
     let pendingRead: PendingRead =
@@ -46,7 +62,7 @@ let ``NodeRead.canServePendingRead returns false when commit index term != curre
     Assert.False(NodeRead.canServePendingRead state pendingRead)
 
 [<Fact>]
-let ``NodeRead.canServePendingRead returns false when hasQuorum fails`` () =
+let ``NodeRead.canServePendingRead returns false when peer quorum is not reached`` () =
     let mutable state = State.initLeaderState (State.init dummyConfig None)
 
     state <-
@@ -59,19 +75,3 @@ let ``NodeRead.canServePendingRead returns false when hasQuorum fails`` () =
           Responses = Set.ofList [ 1 ] }
 
     Assert.False(NodeRead.canServePendingRead state pendingRead)
-
-[<Fact>]
-let ``NodeRead.canServePendingRead returns true when all conditions are met`` () =
-    let mutable state =
-        State.initLeaderState (State.updateTerm 1L (State.init dummyConfig None))
-
-    state <-
-        { state with
-            Volatile = { state.Volatile with CommitIndex = 1L } }
-
-    let pendingRead: PendingRead =
-        { ReadIndex = 1L
-          ReplyChannel = Unchecked.defaultof<_>
-          Responses = Set.ofList [ 1; 2; 3 ] }
-
-    Assert.True(NodeRead.canServePendingRead state pendingRead)

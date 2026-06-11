@@ -420,7 +420,7 @@ let ``Leader replicates commands to followers who both commit and apply`` () =
     Assert.Equal(3L, s3.Volatile.LastApplied)
 
 [<Fact>]
-let ``takeSnapshot on leader trims log and snapshot is installable on follower`` () =
+let ``takeSnapshot on leader trims log and installs snapshot on follower`` () =
     let config1 =
         { NodeId = 1
           Host = ""
@@ -556,7 +556,7 @@ let ``createAppendEntries returns None when leader has no LeaderState`` () =
     Assert.True ae.IsNone
 
 [<Fact>]
-let ``Session-based duplicate detection prevents duplicate application in integration`` () =
+let ``Session-based duplicate detection prevents duplicate command application`` () =
     let c1, c2, c3 = threeNodeConfigs ()
     let mutable s1 = State.init c1 None
     let mutable s2 = State.init c2 None

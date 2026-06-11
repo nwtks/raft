@@ -65,6 +65,40 @@ let ``NodeApply.applyConfigChangeEntry exits JointPhase on FinalChange command``
     Assert.DoesNotContain(result.Config.Peers, (fun p -> p.Id = 3))
 
 [<Fact>]
+let ``NodeApply.applyConfigChangeEntry handles old array format (parseArray fallback)`` () =
+    let state = State.init dummyConfig None
+    let json = """[{"Id":2,"Host":"127.0.0.1","Port":5002}]"""
+    let cmd = ConfigChange.ConfigCommandPrefix + json
+
+    let entry =
+        { Index = 1L
+          Term = 1L
+          Command = cmd
+          ClientId = None
+          SeqNum = None }
+
+    let result = NodeApply.applyConfigChangeEntry entry state
+    Assert.Equal(SinglePhase, result.ConfigPhase)
+    Assert.Single result.Config.Peers |> ignore
+    Assert.Equal(2, result.Config.Peers.Head.Id)
+
+[<Fact>]
+let ``NodeApply.applyConfigChangeEntry uses fallback deserialization when parse returns None`` () =
+    let state = State.init dummyConfig None
+    let cmd = ConfigChange.ConfigCommandPrefix + "null"
+
+    let entry =
+        { Index = 1L
+          Term = 1L
+          Command = cmd
+          ClientId = None
+          SeqNum = None }
+
+    let result = NodeApply.applyConfigChangeEntry entry state
+    Assert.Equal(SinglePhase, result.ConfigPhase)
+    Assert.Null result.Config.Peers
+
+[<Fact>]
 let ``NodeApply.applyNormalEntry applies command and invokes callback when not duplicate`` () =
     let applied = ResizeArray<string>()
     let state = State.init dummyConfig None
@@ -117,40 +151,6 @@ let ``NodeApply.applyNormalEntry without ClientId/SeqNum does not touch session 
     Assert.Equal("cmd1", applied.[0])
     let sessionSeq = result.Persistent.SessionTable |> Map.tryFind "client-1"
     Assert.Equal(Some 10L, sessionSeq)
-
-[<Fact>]
-let ``NodeApply.applyConfigChangeEntry handles old array format (parseArray fallback)`` () =
-    let state = State.init dummyConfig None
-    let json = """[{"Id":2,"Host":"127.0.0.1","Port":5002}]"""
-    let cmd = ConfigChange.ConfigCommandPrefix + json
-
-    let entry =
-        { Index = 1L
-          Term = 1L
-          Command = cmd
-          ClientId = None
-          SeqNum = None }
-
-    let result = NodeApply.applyConfigChangeEntry entry state
-    Assert.Equal(SinglePhase, result.ConfigPhase)
-    Assert.Single result.Config.Peers |> ignore
-    Assert.Equal(2, result.Config.Peers.Head.Id)
-
-[<Fact>]
-let ``NodeApply.applyConfigChangeEntry None branch exercises fallback deserialization`` () =
-    let state = State.init dummyConfig None
-    let cmd = ConfigChange.ConfigCommandPrefix + "null"
-
-    let entry =
-        { Index = 1L
-          Term = 1L
-          Command = cmd
-          ClientId = None
-          SeqNum = None }
-
-    let result = NodeApply.applyConfigChangeEntry entry state
-    Assert.Equal(SinglePhase, result.ConfigPhase)
-    Assert.Null result.Config.Peers
 
 [<Fact>]
 let ``NodeApply.loopApplyCommitted skips over missing log entries`` () =

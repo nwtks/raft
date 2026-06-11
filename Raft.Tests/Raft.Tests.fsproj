@@ -22,7 +22,8 @@
     <Compile Include="NodePromotionTests.fs" />
     <Compile Include="NodeBroadcasterTests.fs" />
     <Compile Include="NodeLocalTests.fs" />
-    <Compile Include="NodeRaftTests.fs" />
+    <Compile Include="NodeTimeoutTests.fs" />
+    <Compile Include="NodeAgentTests.fs" />
     <Compile Include="NodeTests.fs" />
     <Compile Include="TransportTests.fs" />
     <Compile Include="PersistenceTests.fs" />

@@ -1,4 +1,4 @@
-module Raft.Tests.NodeRaftTests
+module Raft.Tests.NodeAgentTests
 
 open Xunit
 open Raft

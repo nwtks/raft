@@ -22,24 +22,6 @@ let makeSnapshotCtx config state =
       PendingReads = [] }
 
 [<Fact>]
-let ``NodeSnapshot.autoSnapshotIfNeeded is no-op when SnapshotAutoThreshold is 0`` () =
-    let state = State.init dummyConfig None
-    let ctx = makeSnapshotCtx dummyConfig state
-    let result = NodeSnapshot.autoSnapshotIfNeeded ctx state
-    Assert.Same(state, result)
-
-[<Fact>]
-let ``NodeSnapshot.autoSnapshotIfNeeded is no-op when log entry count is below threshold`` () =
-    let config =
-        { dummyConfig with
-            SnapshotAutoThreshold = 10 }
-
-    let state = State.init config None
-    let ctx = makeSnapshotCtx config state
-    let result = NodeSnapshot.autoSnapshotIfNeeded ctx state
-    Assert.Same(state, result)
-
-[<Fact>]
 let ``NodeSnapshot.autoSnapshotIfNeeded creates snapshot when log entry count reaches threshold`` () =
     let config =
         { dummyConfig with
@@ -106,31 +88,19 @@ let ``NodeSnapshot.autoSnapshotIfNeeded uses existing snapshot lastIndex when co
     Assert.Equal("snap_data", result.Persistent.Snapshot.Value.StateMachineData)
 
 [<Fact>]
-let ``NodeSnapshot.takeSnapshot at index 1 trims log and adds sentinel`` () =
-    let baseState = State.init dummyConfig None
-    let log = logFromList [ createEntry 1L 1L "a"; createEntry 2L 1L "b" ]
-
-    let state =
-        { baseState with
-            Persistent = { baseState.Persistent with Log = log } }
-
-    let snapped = State.takeSnapshot 1L 1L "snap" state
-    Assert.Equal(2, snapped.Persistent.Log.Count)
-    Assert.True(snapped.Persistent.Log.ContainsKey 1L)
-    Assert.Equal(Log.NoOpCommand, snapped.Persistent.Log.[1L].Command)
-    Assert.True(snapped.Persistent.Log.ContainsKey 2L)
-    Assert.Equal("b", snapped.Persistent.Log.[2L].Command)
+let ``NodeSnapshot.autoSnapshotIfNeeded is no-op when SnapshotAutoThreshold is 0`` () =
+    let state = State.init dummyConfig None
+    let ctx = makeSnapshotCtx dummyConfig state
+    let result = NodeSnapshot.autoSnapshotIfNeeded ctx state
+    Assert.Same(state, result)
 
 [<Fact>]
-let ``NodeSnapshot.takeSnapshot at last index trims all entries`` () =
-    let baseState = State.init dummyConfig None
-    let log = logFromList [ createEntry 1L 1L "a"; createEntry 2L 1L "b" ]
+let ``NodeSnapshot.autoSnapshotIfNeeded is no-op when log entry count is below threshold`` () =
+    let config =
+        { dummyConfig with
+            SnapshotAutoThreshold = 10 }
 
-    let state =
-        { baseState with
-            Persistent = { baseState.Persistent with Log = log } }
-
-    let snapped = State.takeSnapshot 2L 1L "snap" state
-    Assert.Equal(1, snapped.Persistent.Log.Count)
-    Assert.Equal(Log.NoOpCommand, snapped.Persistent.Log.[2L].Command)
-    Assert.False(snapped.Persistent.Log.ContainsKey 1L)
+    let state = State.init config None
+    let ctx = makeSnapshotCtx config state
+    let result = NodeSnapshot.autoSnapshotIfNeeded ctx state
+    Assert.Same(state, result)

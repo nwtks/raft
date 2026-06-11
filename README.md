@@ -16,17 +16,18 @@ This project implements the core mechanics of Raft — Leader Election and Log R
 
 ## Features
 
-- **Leader Election:** Randomized election timeouts, `RequestVote` RPC handling, and dynamic leader promotion on majority vote.
-- **Log Replication:** `AppendEntries` RPC handling, log conflict resolution via `mergeEntries`, and commit index advancement.
-- **Linearizable Reads:** Quorum-based read index protocol ensuring clients always read the most recent committed state.
-- **Snapshot & Log Compaction:** `InstallSnapshot` RPC support with automatic log compaction when log size exceeds threshold (configurable via `SnapshotAutoThreshold`).
-- **Cluster Membership Changes:** Two-phase configuration changes (joint consensus) allowing dynamic addition and removal of nodes without stopping the cluster.
-- **Session De-duplication:** Client-side session tracking prevents duplicate command execution during leader failover or network retries.
-- **Actor Model Design:** Non-blocking, thread-safe state machine using F#'s `MailboxProcessor` (`NodeAgent.fs`). State is fully immutable; each message handler returns a new `RaftState` threaded through a tail-recursive `agentLoop`.
-- **TCP Transport Layer:** Custom JSON-based RPC serialization over raw TCP sockets with length-prefixed framing and hand-written `System.Text.Json` converters (`Transport.fs`, `Serialization.fs`).
-- **Crash Recovery & Persistence:** Atomic disk persistence for `PersistentState` (`CurrentTerm`, `VotedFor`, `Log`, `Snapshot`, `SessionTable`, `LastConfigIndex`) via a `.tmp`-swap write with orphan cleanup on load, ensuring state integrity across restarts (`Persistence.fs`).
-- **Interactive Cluster Demo:** A 3-node Key-Value Store (KVS) cluster demo with `put`, `get`, `state`, and `quit` commands (`Raft.App`).
-- **Comprehensive Test Suite:** Unit and integration tests covering election, log operations, replication, actor behaviour, transport, persistence, and cluster membership changes.
+| Feature | Description |
+|---------|-------------|
+| Leader Election | Randomized election timeouts, `RequestVote` RPC, dynamic leader promotion |
+| Log Replication | `AppendEntries` RPC, log conflict resolution, commit advancement |
+| Linearizable Reads | Quorum-based read index protocol |
+| Snapshot & Compaction | `InstallSnapshot` RPC, automatic log compaction |
+| Cluster Membership | Two-phase joint consensus for dynamic cluster changes |
+| Session De-duplication | Client-side session tracking prevents duplicate execution |
+| Interactive Demo | 3-node Key-Value Store cluster with REPL |
+| Comprehensive Tests | Unit/integration tests (xUnit + Coverlet) |
+
+See [docs/architecture.md](docs/architecture.md) for detailed descriptions of the actor model design, TCP transport layer, crash recovery, and other architectural details.
 
 ## Configuration
 
