@@ -89,7 +89,7 @@ let ``State.recoverConfigPhase uses latest config change when multiple entries e
     Assert.Equal(6, updatedConfig.Peers.[0].Id)
 
 [<Fact>]
-let ``State.init without persisted state returns term 0 and Follower role`` () =
+let ``State.init without persisted state returns term 0 and follower role`` () =
     let state = State.init dummyConfigStandalone None
 
     Assert.Equal(Follower, state.Role)
@@ -127,7 +127,7 @@ let ``State.init with persisted state restores CurrentTerm, VotedFor, and Log`` 
     Assert.True state.LeaderState.IsNone
 
 [<Fact>]
-let ``State.init sets Follower role; initLeaderState sets Leader role and current leader`` () =
+let ``State.init sets follower role; initLeaderState sets leader role and current leader`` () =
     let state = State.init dummyConfig None
     Assert.Equal(Follower, state.Role)
     Assert.Equal(dummyConfig, state.Config)
@@ -152,7 +152,7 @@ let ``State.initLeaderState creates correct NextIndex and MatchIndex for all pee
         Assert.Equal(0L, ls.MatchIndex.[p.Id])
 
 [<Fact>]
-let ``State.updateTerm resets role to Follower on higher term`` () =
+let ``State.updateTerm resets role to follower when term is higher`` () =
     let state = State.init dummyConfig None
     let leader = State.initLeaderState state
 
@@ -199,7 +199,7 @@ let ``State.updateLastApplied sets LastApplied without changing CommitIndex`` ()
     Assert.Equal(0L, updated.Volatile.CommitIndex)
 
 [<Fact>]
-let ``State.followLeader sets Follower role and records leader ID`` () =
+let ``State.followLeader sets follower role and records leader ID`` () =
     let state = State.init dummyConfig None
     let updated = State.followLeader 3L 2 state
 

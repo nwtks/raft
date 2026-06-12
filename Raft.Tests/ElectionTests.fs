@@ -5,7 +5,7 @@ open Raft
 open TestHelpers
 
 [<Fact>]
-let ``Election.startElection transitions to Candidate with incremented term and self-vote`` () =
+let ``Election.startElection transitions to candidate with incremented term and self-vote`` () =
     let state = State.init dummyConfig None
     Assert.Equal(Follower, state.Role)
     Assert.Equal(0L, state.Persistent.CurrentTerm)
@@ -90,7 +90,7 @@ let ``Election.handleRequestVote grants vote to candidate with up-to-date log``
     Assert.Equal(expectedVotedForOpt, newState.Persistent.VotedFor)
 
 [<Fact>]
-let ``Election.handleVoteResponse promotes node to Leader upon receiving majority votes`` () =
+let ``Election.handleVoteResponse promotes node to leader upon receiving majority votes`` () =
     let state = Election.startElection (State.init dummyConfig None)
 
     let resp =
@@ -117,7 +117,7 @@ let ``Election.handleVoteResponse updates current term when response carries a h
     Assert.Equal(None, newState.Persistent.VotedFor)
 
 [<Fact>]
-let ``Election.handleVoteResponse records vote but stays Candidate without majority`` () =
+let ``Election.handleVoteResponse records vote but stays candidate without majority`` () =
     let config5Nodes =
         { dummyConfig with
             Peers =
@@ -141,7 +141,7 @@ let ``Election.handleVoteResponse records vote but stays Candidate without major
     Assert.True(newState.LeaderState.IsNone)
 
 [<Fact>]
-let ``Election.handleVoteResponse ignores denied vote when staying Candidate without majority`` () =
+let ``Election.handleVoteResponse ignores denied vote when staying candidate without majority`` () =
     let config5Nodes =
         { dummyConfig with
             Peers =
@@ -178,7 +178,7 @@ let ``Election.handleVoteResponse ignores duplicate vote from already-voted node
     Assert.Equal(afterFirst, afterDup)
 
 [<Fact>]
-let ``Election.handleVoteResponse is no-op when node is Follower (not Candidate)`` () =
+let ``Election.handleVoteResponse is no-op when node is follower (not candidate)`` () =
     let state = State.init dummyConfig None
 
     let resp =

@@ -1,12 +1,11 @@
 namespace Raft
 
 module NodeSnapshot =
-    let handleTakeSnapshot ctx data (ch: AsyncReplyChannel<unit>) =
+    let handleTakeSnapshot ctx data =
         let lastApplied = ctx.State.Volatile.LastApplied
         let lastTerm = Log.termAt lastApplied ctx.State.Persistent.Log
         let state = State.takeSnapshot lastApplied lastTerm data ctx.State
         NodeUtil.saveIfChanged ctx state
-        ch.Reply()
 
         { State = state
           ElectionAction = Keep

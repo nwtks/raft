@@ -12,7 +12,7 @@ let dummyEntry =
       SeqNum = None }
 
 [<Fact>]
-let ``Replication.createAppendEntries returns None when node is not Leader`` () =
+let ``Replication.createAppendEntries returns None when not leader`` () =
     let state = State.init dummyConfig None
     Assert.True(Replication.createAppendEntries 2 state |> Option.isNone)
     Assert.True(Replication.createHeartbeat 2 state |> Option.isNone)
@@ -267,7 +267,7 @@ let ``Replication.handleAppendEntriesResponse updates term when response contain
     Assert.Equal(2L, newState.Persistent.CurrentTerm)
 
 [<Fact>]
-let ``Replication.handleAppendEntriesResponse ignores response when node is not the Leader`` () =
+let ``Replication.handleAppendEntriesResponse ignores response when not leader`` () =
     let state = State.init dummyConfig None
 
     let resp =
@@ -560,7 +560,7 @@ let ``Replication.createInstallSnapshot returns Some when snapshot exists and fo
     Assert.Equal("snap", snap.Value.Data)
 
 [<Fact>]
-let ``Replication.createInstallSnapshot returns None when node is not Leader`` () =
+let ``Replication.createInstallSnapshot returns None when not leader`` () =
     let state = State.init dummyConfig None
     Assert.True(Replication.createInstallSnapshot 2 state |> Option.isNone)
 
@@ -813,13 +813,13 @@ let ``Replication.advanceCommitIndex advances commit index when majority of peer
     Assert.Equal(1L, newState.Volatile.CommitIndex)
 
 [<Fact>]
-let ``Replication.advanceCommitIndex returns unchanged state when node is not Leader`` () =
+let ``Replication.advanceCommitIndex returns unchanged state when not leader`` () =
     let state = State.init dummyConfig None
     let newState = Replication.advanceCommitIndex state
     Assert.Equal(state, newState)
 
 [<Fact>]
-let ``Replication.appendJointConsensus appends config entry when Leader`` () =
+let ``Replication.appendJointConsensus appends config entry when leader`` () =
     let state = State.initLeaderState (State.init dummyConfig None)
     let oldPeers = dummyConfig.Peers
     let newPeers = [ { Id = 4; Host = ""; Port = 0 }; { Id = 5; Host = ""; Port = 0 } ]
@@ -831,13 +831,13 @@ let ``Replication.appendJointConsensus appends config entry when Leader`` () =
     Assert.True(entry.Command.Contains("j"))
 
 [<Fact>]
-let ``Replication.appendJointConsensus is no-op when not Leader`` () =
+let ``Replication.appendJointConsensus is no-op when not leader`` () =
     let state = State.init dummyConfig None
     let newState = Replication.appendJointConsensus [] [] state
     Assert.True(Map.isEmpty newState.Persistent.Log)
 
 [<Fact>]
-let ``Replication.appendFinalConfiguration appends final config entry when Leader`` () =
+let ``Replication.appendFinalConfiguration appends final config entry when leader`` () =
     let state = State.initLeaderState (State.init dummyConfig None)
     let newPeers = [ { Id = 4; Host = ""; Port = 0 } ]
     let newState = Replication.appendFinalConfiguration newPeers state
@@ -848,13 +848,13 @@ let ``Replication.appendFinalConfiguration appends final config entry when Leade
     Assert.True(entry.Command.Contains("f"))
 
 [<Fact>]
-let ``Replication.appendFinalConfiguration is no-op when not Leader`` () =
+let ``Replication.appendFinalConfiguration is no-op when not leader`` () =
     let state = State.init dummyConfig None
     let newState = Replication.appendFinalConfiguration [] state
     Assert.True(Map.isEmpty newState.Persistent.Log)
 
 [<Fact>]
-let ``Replication.appendCommand appends entry when node is Leader`` () =
+let ``Replication.appendCommand appends entry when leader`` () =
     let state = State.initLeaderState (State.init dummyConfig None)
     let newState = Replication.appendCommand "put x 42" state
 
@@ -864,13 +864,13 @@ let ``Replication.appendCommand appends entry when node is Leader`` () =
     Assert.Equal("put x 42", (Map.find 2L newState.Persistent.Log).Command)
 
 [<Fact>]
-let ``Replication.appendCommand discards command when node is not Leader`` () =
+let ``Replication.appendCommand discards command when not leader`` () =
     let state = State.init dummyConfig None
     let newState = Replication.appendCommand "should fail" state
     Assert.True(Map.isEmpty newState.Persistent.Log)
 
 [<Fact>]
-let ``Replication.appendCommandWithSession appends with session info when Leader`` () =
+let ``Replication.appendCommandWithSession appends with session info when leader`` () =
     let state = State.initLeaderState (State.init dummyConfig None)
     let newState = Replication.appendCommandWithSession "put x 1" "client-1" 42L state
 
@@ -892,7 +892,7 @@ let ``Replication.appendCommandWithSession without session info appends regular 
     Assert.Equal(Some 0L, entry.SeqNum)
 
 [<Fact>]
-let ``Replication.appendCommandWithSession discards command when node is not Leader`` () =
+let ``Replication.appendCommandWithSession discards command when not leader`` () =
     let state = State.init dummyConfig None
     let newState = Replication.appendCommandWithSession "cmd" "client-1" 1L state
     Assert.True(Map.isEmpty newState.Persistent.Log)

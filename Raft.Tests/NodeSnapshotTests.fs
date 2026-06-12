@@ -6,7 +6,6 @@ open TestHelpers
 
 let makeSnapshotCtx config state =
     let inbox = new MailboxProcessor<NodeMessage>(fun _ -> async { () })
-    let cts = new System.Threading.CancellationTokenSource()
 
     { Config = config
       Transport = MockTransport() :> ITransport
@@ -18,8 +17,73 @@ let makeSnapshotCtx config state =
       State = state
       ElectionTimer = None
       HeartbeatTimer = None
-      CancellationTokenSource = cts
+      CancellationTokenSource = new System.Threading.CancellationTokenSource()
       PendingReads = [] }
+
+[<Fact>]
+let ``NodeSnapshot.handleTakeSnapshot creates snapshot at lastApplied index with given data`` () =
+    let mutable state = State.init dummyConfig None
+    state <- State.initLeaderState state
+    state <- Replication.appendCommand "x" state
+    state <- State.updateLastApplied 2L state
+    let ctx = makeSnapshotCtx dummyConfig state
+
+    let result = NodeSnapshot.handleTakeSnapshot ctx "test_data"
+
+    Assert.True result.State.Persistent.Snapshot.IsSome
+    let snap = result.State.Persistent.Snapshot.Value
+    Assert.Equal(2L, snap.LastIncludedIndex)
+    Assert.Equal("test_data", snap.StateMachineData)
+
+[<Fact>]
+let ``NodeSnapshot.handleTakeSnapshot trims log entries below snapshot index`` () =
+    let mutable state = State.init dummyConfig None
+    state <- State.initLeaderState state
+    state <- Replication.appendCommand "a" state
+    state <- Replication.appendCommand "b" state
+    state <- State.updateLastApplied 3L state
+    let ctx = makeSnapshotCtx dummyConfig state
+
+    let result = NodeSnapshot.handleTakeSnapshot ctx "data"
+
+    let log = result.State.Persistent.Log
+    Assert.False(log |> Map.containsKey 1L)
+    Assert.False(log |> Map.containsKey 2L)
+    Assert.True(log |> Map.containsKey 3L)
+    Assert.Equal(Log.NoOpCommand, log.[3L].Command)
+
+[<Fact>]
+let ``NodeSnapshot.handleTakeSnapshot creates snapshot and preserves uncommitted entries`` () =
+    let state =
+        State.initLeaderState (State.updateTerm 1L (State.init dummyConfig None))
+
+    let leaderState = Replication.appendCommand "test-command" state
+    let ctx = makeSnapshotCtx dummyConfig leaderState
+    let result = NodeSnapshot.handleTakeSnapshot ctx "snapshot-data"
+    Assert.True result.State.Persistent.Snapshot.IsSome
+    Assert.Equal("snapshot-data", result.State.Persistent.Snapshot.Value.StateMachineData)
+    Assert.True(result.State.Persistent.Log.ContainsKey 2L)
+    Assert.Equal("test-command", result.State.Persistent.Log.[2L].Command)
+
+[<Fact>]
+let ``NodeSnapshot.handleTakeSnapshot with committed entries trims log`` () =
+    let mutable state =
+        State.initLeaderState (State.updateTerm 1L (State.init dummyConfig None))
+
+    let mutable leaderState = state
+    leaderState <- Replication.appendCommand "cmd1" leaderState
+    leaderState <- Replication.appendCommand "cmd2" leaderState
+    leaderState <- State.updateLastApplied 3L leaderState
+    State.updateCommitIndex 3L leaderState |> ignore
+    let ctx = makeSnapshotCtx dummyConfig leaderState
+    let result = NodeSnapshot.handleTakeSnapshot ctx "snap-data"
+    Assert.True result.State.Persistent.Snapshot.IsSome
+    Assert.Equal(3L, result.State.Persistent.Snapshot.Value.LastIncludedIndex)
+    Assert.Equal("snap-data", result.State.Persistent.Snapshot.Value.StateMachineData)
+    Assert.False(result.State.Persistent.Log.ContainsKey 1L)
+    Assert.False(result.State.Persistent.Log.ContainsKey 2L)
+    Assert.True(result.State.Persistent.Log.ContainsKey 3L)
+    Assert.Equal(Log.NoOpCommand, result.State.Persistent.Log.[3L].Command)
 
 [<Fact>]
 let ``NodeSnapshot.autoSnapshotIfNeeded creates snapshot when log entry count reaches threshold`` () =

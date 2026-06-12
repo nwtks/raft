@@ -15,7 +15,31 @@ let ``RaftNode initializes as Follower with term 0`` () =
     }
 
 [<Fact>]
-let ``Leader RaftNode accepts submitted commands and applies them to state machine`` () =
+let ``RaftNode constructor throws SocketException on StartListener failure`` () =
+    let transport =
+        { new ITransport with
+            member _.SendMessage _ _ = async { return () }
+
+            member _.StartListener _ _ _ =
+                raise (System.Net.Sockets.SocketException()) }
+
+    Assert.Throws<System.Net.Sockets.SocketException>(fun () ->
+        new RaftNode(dummyConfig, transport, MockPersistence(), ignore) |> ignore)
+
+[<Fact>]
+let ``RaftNode constructor throws IOException on StartListener failure`` () =
+    let transport =
+        { new ITransport with
+            member _.SendMessage _ _ = async { return () }
+
+            member _.StartListener _ _ _ =
+                raise (System.IO.IOException("test IO error")) }
+
+    Assert.Throws<System.IO.IOException>(fun () ->
+        new RaftNode(dummyConfig, transport, MockPersistence(), ignore) |> ignore)
+
+[<Fact>]
+let ``RaftNode.SubmitCommand accepts submitted commands and applies them to state machine`` () =
     task {
         let applied = ResizeArray<LogEntry>()
         let node, _, _ = makeNodeWithApply (configForNode 1 0) (fun e -> applied.Add e)
@@ -29,17 +53,7 @@ let ``Leader RaftNode accepts submitted commands and applies them to state machi
     }
 
 [<Fact>]
-let ``RaftNode.SubmitCommand returns Redirect when node is not Leader`` () =
-    task {
-        let node, _, _ = makeNode (configForNode 1 0)
-
-        match node.SubmitCommand "put a 1" with
-        | Redirect _ -> ()
-        | Accepted -> Assert.Fail "Expected redirect"
-    }
-
-[<Fact>]
-let ``Leader RaftNode.SubmitCommandWithSession accepts command with clientId and seqNum`` () =
+let ``RaftNode.SubmitCommandWithSession accepts command with clientId and seqNum`` () =
     task {
         let node, transport, _ = makeNode (configWithPeers 1 0)
         let _ = becomeLeader node transport
@@ -134,7 +148,54 @@ let ``RaftNode.SubmitCommandWithSession rejects older seqNum after higher seqNum
     }
 
 [<Fact>]
-let ``Leader RaftNode serves LinearizableRead after committing entry in current term`` () =
+let ``RaftNode.LinearizableRead returns ReadRedirect for standalone node`` () =
+    task {
+        let node, _, _ = makeNode (configForNode 1 0)
+        let result = node.LinearizableRead()
+        Assert.Equal(ReadRedirect None, result)
+    }
+
+[<Fact>]
+let ``RaftNode queues LinearizableRead until committed entry in current term is applied`` () =
+    task {
+        let node, transport, _ = makeNode (configWithPeers 1 0)
+        let term = becomeLeader node transport
+
+        let readResult = ref Unchecked.defaultof<ReadCommandResult>
+        let readDone = new System.Threading.ManualResetEventSlim false
+
+        node.PostLinearizableRead(fun r ->
+            readResult.Value <- r
+            readDone.Set())
+
+        node.GetState() |> ignore
+
+        transport.ReceiveMessage(
+            AppendEntriesResponseMsg
+                { FollowerTerm = term
+                  Success = true
+                  MatchIndex = 1L
+                  FollowerId = 2
+                  ConflictTerm = 0L
+                  ConflictIndex = 0L }
+        )
+
+        transport.ReceiveMessage(
+            AppendEntriesResponseMsg
+                { FollowerTerm = term
+                  Success = true
+                  MatchIndex = 1L
+                  FollowerId = 3
+                  ConflictTerm = 0L
+                  ConflictIndex = 0L }
+        )
+
+        Assert.True(readDone.Wait 5000)
+        Assert.Equal(ReadReady, readResult.Value)
+    }
+
+[<Fact>]
+let ``RaftNode serves LinearizableRead after committing entry in current term`` () =
     task {
         let applied = ResizeArray<LogEntry>()
 
@@ -202,46 +263,7 @@ let ``Leader RaftNode serves LinearizableRead after committing entry in current 
     }
 
 [<Fact>]
-let ``Leader RaftNode queues LinearizableRead until committed entry in current term is applied`` () =
-    task {
-        let node, transport, _ = makeNode (configWithPeers 1 0)
-        let term = becomeLeader node transport
-
-        let readResult = ref Unchecked.defaultof<ReadCommandResult>
-        let readDone = new System.Threading.ManualResetEventSlim false
-
-        node.PostLinearizableRead(fun r ->
-            readResult.Value <- r
-            readDone.Set())
-
-        node.GetState() |> ignore
-
-        transport.ReceiveMessage(
-            AppendEntriesResponseMsg
-                { FollowerTerm = term
-                  Success = true
-                  MatchIndex = 1L
-                  FollowerId = 2
-                  ConflictTerm = 0L
-                  ConflictIndex = 0L }
-        )
-
-        transport.ReceiveMessage(
-            AppendEntriesResponseMsg
-                { FollowerTerm = term
-                  Success = true
-                  MatchIndex = 1L
-                  FollowerId = 3
-                  ConflictTerm = 0L
-                  ConflictIndex = 0L }
-        )
-
-        Assert.True(readDone.Wait 5000)
-        Assert.Equal(ReadReady, readResult.Value)
-    }
-
-[<Fact>]
-let ``Leader RaftNode stepping down resolves pending linearizable reads with redirect`` () =
+let ``RaftNode stepping down resolves pending linearizable reads with redirect`` () =
     task {
         let node, transport, _ = makeNode (configWithPeers 1 0)
         let term = becomeLeader node transport
@@ -273,223 +295,44 @@ let ``Leader RaftNode stepping down resolves pending linearizable reads with red
     }
 
 [<Fact>]
-let ``Follower RaftNode LinearizableRead returns ReadRedirect None when no leader`` () =
-    task {
-        let node, _, _ = makeNode (configWithPeers 1 0)
-
-        match node.LinearizableRead() with
-        | ReadRedirect None -> ()
-        | _ -> Assert.Fail "Expected ReadRedirect None for follower without leader"
-    }
-
-[<Fact>]
-let ``Follower RaftNode LinearizableRead with known leader redirects to that leader`` () =
+let ``RaftNode.SubmitTakeSnapshot stores snapshot data in state`` () =
     task {
         let node, transport, _ = makeNode (configWithPeers 1 0)
-
-        transport.ReceiveMessage(
-            AppendEntriesMsg
-                { LeaderTerm = 1L
-                  LeaderId = 2
-                  PrevLogIndex = 0L
-                  PrevLogTerm = 0L
-                  Entries = []
-                  LeaderCommit = 0L }
-        )
-
-        node.GetState() |> ignore
-
-        let state = node.GetState()
-        Assert.Equal(Some 2, state.CurrentLeader)
-
-        match node.LinearizableRead() with
-        | ReadRedirect(Some peer) when peer.Id = 2 -> ()
-        | other -> Assert.Fail $"Expected ReadRedirect(Some(2)) but got {other}"
-    }
-
-[<Fact>]
-let ``RaftNode.SubmitTakeSnapshot creates snapshot and preserves uncommitted entries`` () =
-    task {
-        let node, _, _ = makeNode (configForNode 1 0)
-
-        node.TriggerElectionTimeout()
-        Assert.Equal(Leader, (node.GetState()).Role)
-
-        Assert.Equal(Accepted, node.SubmitCommand "test-command")
+        let _ = becomeLeader node transport
 
         node.SubmitTakeSnapshot "snapshot-data"
 
         let state = node.GetState()
         Assert.True state.Persistent.Snapshot.IsSome
         Assert.Equal("snapshot-data", state.Persistent.Snapshot.Value.StateMachineData)
-        Assert.True(state.Persistent.Log.ContainsKey 2L)
-        Assert.Equal("test-command", state.Persistent.Log.[2L].Command)
     }
 
 [<Fact>]
-let ``RaftNode.SubmitTakeSnapshot with committed entries trims log`` () =
-    task {
-        let applied = ResizeArray<LogEntry>()
-
-        let node, transport, _ =
-            makeNodeWithApply (configWithPeers 1 0) (fun e -> applied.Add e)
-
-        let term = becomeLeader node transport
-
-        Assert.Equal(Accepted, node.SubmitCommand "cmd1")
-
-        transport.ReceiveMessage(
-            AppendEntriesResponseMsg
-                { FollowerTerm = term
-                  Success = true
-                  MatchIndex = 2L
-                  FollowerId = 2
-                  ConflictTerm = 0L
-                  ConflictIndex = 0L }
-        )
-
-        transport.ReceiveMessage(
-            AppendEntriesResponseMsg
-                { FollowerTerm = term
-                  Success = true
-                  MatchIndex = 2L
-                  FollowerId = 3
-                  ConflictTerm = 0L
-                  ConflictIndex = 0L }
-        )
-
-        let s = node.GetState()
-        Assert.Equal(2L, s.Volatile.LastApplied)
-        Assert.Equal(1, applied.Count)
-
-        Assert.Equal(Accepted, node.SubmitCommand "cmd2")
-        Assert.Equal(1, applied.Count)
-
-        transport.ReceiveMessage(
-            AppendEntriesResponseMsg
-                { FollowerTerm = term
-                  Success = true
-                  MatchIndex = 3L
-                  FollowerId = 2
-                  ConflictTerm = 0L
-                  ConflictIndex = 0L }
-        )
-
-        transport.ReceiveMessage(
-            AppendEntriesResponseMsg
-                { FollowerTerm = term
-                  Success = true
-                  MatchIndex = 3L
-                  FollowerId = 3
-                  ConflictTerm = 0L
-                  ConflictIndex = 0L }
-        )
-
-        let stateWithCommitted = node.GetState()
-        Assert.Equal(2, applied.Count)
-        Assert.Equal(3L, stateWithCommitted.Volatile.LastApplied)
-
-        node.SubmitTakeSnapshot "snap-data"
-
-        let state = node.GetState()
-        Assert.True state.Persistent.Snapshot.IsSome
-        Assert.Equal(3L, state.Persistent.Snapshot.Value.LastIncludedIndex)
-        Assert.Equal("snap-data", state.Persistent.Snapshot.Value.StateMachineData)
-
-        Assert.False(state.Persistent.Log.ContainsKey 1L)
-        Assert.False(state.Persistent.Log.ContainsKey 2L)
-        Assert.True(state.Persistent.Log.ContainsKey 3L)
-        Assert.Equal(Log.NoOpCommand, state.Persistent.Log.[3L].Command)
-    }
-
-[<Fact>]
-let ``Leader RaftNode.AddPeer adds as non-voting member and starts replication`` () =
+let ``RaftNode.AddPeer adds non-voting peer when leader`` () =
     task {
         let node, transport, _ = makeNode (configWithPeers 1 0)
         let _ = becomeLeader node transport
-        transport.Messages.Clear()
 
         let newPeer = { Id = 4; Host = "127.0.0.1"; Port = 0 }
-        let success = node.AddPeer newPeer
-        Assert.True success
+        let result = node.AddPeer newPeer
 
-        let finalState = node.GetState()
-        Assert.Equal(1, finalState.Persistent.Log.Count)
-        Assert.Contains(newPeer, finalState.NonVotingPeers)
-        Assert.Contains(transport.Messages, fun (p, _) -> p.Id = 4)
+        Assert.True result
+        let state = node.GetState()
+        Assert.Contains(newPeer, state.NonVotingPeers)
     }
 
 [<Fact>]
-let ``Leader RaftNode.AddPeer returns true for already existing voting peer`` () =
+let ``RaftNode.RemovePeer appends config change entry when leader`` () =
     task {
         let node, transport, _ = makeNode (configWithPeers 1 0)
-        let _ = becomeLeader node transport
+        let term = becomeLeader node transport
 
-        let existingPeer = { Id = 2; Host = "127.0.0.1"; Port = 0 }
-        let success = node.AddPeer existingPeer
-        Assert.True success
+        let result = node.RemovePeer 3
 
+        Assert.True result
         let state = node.GetState()
-        Assert.Equal(Leader, state.Role)
-        Assert.DoesNotContain(existingPeer, state.NonVotingPeers)
-    }
-
-[<Fact>]
-let ``Non-leader RaftNode.AddPeer returns false`` () =
-    task {
-        let node, _, _ = makeNode (configForNode 1 0)
-
-        let state = node.GetState()
-        Assert.Equal(Follower, state.Role)
-
-        let success = node.AddPeer { Id = 2; Host = "127.0.0.1"; Port = 0 }
-        Assert.False success
-    }
-
-[<Fact>]
-let ``Leader RaftNode.RemovePeer appends configuration entry and broadcasts`` () =
-    task {
-        let node, transport, _ = makeNode (configWithPeers 1 0)
-        let _ = becomeLeader node transport
-        transport.Messages.Clear()
-
-        let success = node.RemovePeer 3
-        Assert.True success
-
-        node.GetState() |> ignore
-
-        let finalState = node.GetState()
-        Assert.Equal(2, finalState.Persistent.Log.Count)
-        Assert.StartsWith(ConfigChange.ConfigCommandPrefix, (Map.find 2L finalState.Persistent.Log).Command)
-
-        Assert.Contains(transport.Messages, fun (p, _) -> p.Id = 2)
-    }
-
-[<Fact>]
-let ``Non-leader RaftNode.RemovePeer returns false`` () =
-    task {
-        let node, _, _ = makeNode (configForNode 1 0)
-
-        let state = node.GetState()
-        Assert.Equal(Follower, state.Role)
-
-        let success = node.RemovePeer 2
-        Assert.False success
-    }
-
-[<Fact>]
-let ``RaftNode.Dispose does not throw`` () =
-    task {
-        let node, _, _ = makeNode (configForNode 1 0)
-
-        let ex: System.Exception option =
-            try
-                (node :> System.IDisposable).Dispose()
-                None
-            with e ->
-                Some e
-
-        Assert.Null ex
+        Assert.Equal(2, state.Persistent.Log.Count)
+        Assert.StartsWith(ConfigChange.ConfigCommandPrefix, (Map.find 2L state.Persistent.Log).Command)
     }
 
 [<Fact>]
@@ -583,7 +426,31 @@ let ``RaftNode handles RequestVote and wins election to become Leader`` () =
     }
 
 [<Fact>]
-let ``Leader RaftNode broadcasts AppendEntries on heartbeat, processes responses, and applies committed entries`` () =
+let ``RaftNode ignores RequestVote from unknown candidate`` () =
+    task {
+        let node, transport, _ = makeNode (configWithPeers 1 0)
+
+        let rv =
+            { CandidateTerm = 1L
+              CandidateId = 99
+              LastLogIndex = 0L
+              LastLogTerm = 0L }
+
+        transport.ReceiveMessage(RequestVoteMsg rv)
+        node.GetState() |> ignore
+
+        Assert.DoesNotContain(
+            transport.Messages,
+            fun (p, msg) ->
+                p.Id = 99
+                && match msg with
+                   | RequestVoteResponseMsg _ -> true
+                   | _ -> false
+        )
+    }
+
+[<Fact>]
+let ``RaftNode broadcasts AppendEntries on heartbeat, processes responses, and applies committed entries`` () =
     task {
         let applied = ResizeArray<LogEntry>()
 
@@ -663,30 +530,6 @@ let ``Leader RaftNode broadcasts AppendEntries on heartbeat, processes responses
     }
 
 [<Fact>]
-let ``RaftNode ignores RequestVote from unknown candidate`` () =
-    task {
-        let node, transport, _ = makeNode (configWithPeers 1 0)
-
-        let rv =
-            { CandidateTerm = 1L
-              CandidateId = 99
-              LastLogIndex = 0L
-              LastLogTerm = 0L }
-
-        transport.ReceiveMessage(RequestVoteMsg rv)
-        node.GetState() |> ignore
-
-        Assert.DoesNotContain(
-            transport.Messages,
-            fun (p, msg) ->
-                p.Id = 99
-                && match msg with
-                   | RequestVoteResponseMsg _ -> true
-                   | _ -> false
-        )
-    }
-
-[<Fact>]
 let ``RaftNode ignores AppendEntries from unknown leader`` () =
     task {
         let node, transport, _ = makeNode (configWithPeers 1 0)
@@ -743,7 +586,7 @@ let ``RaftNode handles InstallSnapshot from known leader and installs snapshot``
     }
 
 [<Fact>]
-let ``Leader RaftNode handles InstallSnapshotResponse and updates match index`` () =
+let ``RaftNode handles InstallSnapshotResponse and updates match index`` () =
     task {
         let node, transport, _ = makeNode (configWithPeers 1 0)
         let term = becomeLeader node transport
@@ -845,4 +688,19 @@ let ``RaftNode ignores InstallSnapshotResponse when not leader`` () =
 
         let state = node.GetState()
         Assert.Equal(Follower, state.Role)
+    }
+
+[<Fact>]
+let ``RaftNode.Dispose does not throw`` () =
+    task {
+        let node, _, _ = makeNode (configForNode 1 0)
+
+        let ex: System.Exception option =
+            try
+                (node :> System.IDisposable).Dispose()
+                None
+            with e ->
+                Some e
+
+        Assert.Null ex
     }

@@ -1,45 +1,41 @@
 namespace Raft
 
 module NodeLocal =
-    let commitAndBroadcast ctx state onApplied =
+    let commitAndBroadcast ctx state =
         NodeUtil.saveIfChanged ctx state
         NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state
         let appliedState = NodeApply.applyCommitted ctx.OnApply state
-        onApplied appliedState
 
         NodeSnapshot.autoSnapshotIfNeeded ctx appliedState
         |> NodePromotion.tryFinalizeConfiguration
 
-    let handleClientCommand ctx cmd clientId seqNum (replyChannel: AsyncReplyChannel<ClientCommandResult>) =
+    let handleClientCommand ctx cmd clientId seqNum : RaftState * ClientCommandResult =
         if ctx.State.Role = Leader then
             match clientId, seqNum with
             | Some cId, Some sNum ->
                 match ctx.State.Persistent.SessionTable |> Map.tryFind cId with
-                | Some lastSeq when sNum <= lastSeq ->
-                    replyChannel.Reply Accepted
-                    ctx.State
+                | Some lastSeq when sNum <= lastSeq -> ctx.State, Accepted
                 | _ ->
                     let state = Replication.appendCommandWithSession cmd cId sNum ctx.State
-                    commitAndBroadcast ctx state (fun _ -> replyChannel.Reply Accepted)
+                    commitAndBroadcast ctx state, Accepted
             | _ ->
                 let state = Replication.appendCommand cmd ctx.State
-                commitAndBroadcast ctx state (fun _ -> replyChannel.Reply Accepted)
+                commitAndBroadcast ctx state, Accepted
         else
-            ctx.State.CurrentLeader
-            |> Option.bind (fun leaderId -> ctx.Config.Peers |> List.tryFind (fun p -> p.Id = leaderId))
-            |> Redirect
-            |> replyChannel.Reply
+            let result =
+                ctx.State.CurrentLeader
+                |> Option.bind (fun leaderId -> ctx.Config.Peers |> List.tryFind (fun p -> p.Id = leaderId))
+                |> Redirect
 
-            ctx.State
+            ctx.State, result
 
-    let handleAddPeer ctx peerInfo (replyChannel: AsyncReplyChannel<bool>) =
+    let handleAddPeer ctx peerInfo : RaftState * bool =
         if ctx.State.Role = Leader then
             if
                 ctx.State.Config.Peers |> List.exists (fun p -> p.Id = peerInfo.Id)
                 || ctx.State.NonVotingPeers |> List.exists (fun p -> p.Id = peerInfo.Id)
             then
-                replyChannel.Reply true
-                ctx.State
+                ctx.State, true
             else
                 let state =
                     { ctx.State with
@@ -59,27 +55,33 @@ module NodeLocal =
                     | None -> state
 
                 NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport newState
-                replyChannel.Reply true
-                newState
+                newState, true
         else
-            replyChannel.Reply false
-            ctx.State
+            ctx.State, false
 
-    let handleRemovePeer ctx peerId (replyChannel: AsyncReplyChannel<bool>) =
+    let handleRemovePeer ctx peerId : RaftState * bool =
         if ctx.State.Role = Leader then
             let oldPeers = ctx.State.Config.Peers
             let newPeers = oldPeers |> List.filter (fun p -> p.Id <> peerId)
             let state = Replication.appendJointConsensus oldPeers newPeers ctx.State
-            commitAndBroadcast ctx state (fun _ -> replyChannel.Reply true)
+            commitAndBroadcast ctx state, true
         else
-            replyChannel.Reply false
-            ctx.State
+            ctx.State, false
 
     let dispatchLocalMessage ctx =
         function
-        | ClientCommand(cmd, clientId, seqNum, replyChannel) -> handleClientCommand ctx cmd clientId seqNum replyChannel
-        | AddPeer(peerInfo, replyChannel) -> handleAddPeer ctx peerInfo replyChannel
-        | RemovePeer(peerId, replyChannel) -> handleRemovePeer ctx peerId replyChannel
+        | ClientCommand(cmd, clientId, seqNum, replyChannel) ->
+            let state, result = handleClientCommand ctx cmd clientId seqNum
+            replyChannel.Reply result
+            state
+        | AddPeer(peerInfo, replyChannel) ->
+            let state, result = handleAddPeer ctx peerInfo
+            replyChannel.Reply result
+            state
+        | RemovePeer(peerId, replyChannel) ->
+            let state, result = handleRemovePeer ctx peerId
+            replyChannel.Reply result
+            state
         | _ ->
             NodeUtil.log $"Warning: unexpected message routed to handleLocalMessage, ignoring"
             ctx.State

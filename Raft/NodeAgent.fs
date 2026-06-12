@@ -37,8 +37,25 @@ module NodeAgent =
             | AddPeer _
             | RemovePeer _ as localMsg ->
                 return! NodeLocal.handleLocalMessage ctx localMsg |> postProcess ctx |> agentLoop
+            | LinearizableRead replyChannel when ctx.State.Role = Leader ->
+                let pendingRead: PendingRead =
+                    { ReadIndex = ctx.State.Volatile.CommitIndex
+                      ReplyChannel = replyChannel
+                      Responses = Set.singleton ctx.State.Config.NodeId }
+
+                return!
+                    NodeRead.handleLinearizableRead ctx (ctx.PendingReads @ [ pendingRead ])
+                    |> postProcess ctx
+                    |> agentLoop
             | LinearizableRead replyChannel ->
-                return! NodeRead.handleLinearizableRead ctx replyChannel |> postProcess ctx |> agentLoop
-            | TakeSnapshot(data, ch) ->
-                return! NodeSnapshot.handleTakeSnapshot ctx data ch |> postProcess ctx |> agentLoop
+                let leaderInfo =
+                    ctx.State.CurrentLeader
+                    |> Option.bind (fun leaderId -> ctx.Config.Peers |> List.tryFind (fun p -> p.Id = leaderId))
+
+                replyChannel.Reply(ReadRedirect leaderInfo)
+                return! agentLoop ctx
+            | TakeSnapshot(data, replyChannel) ->
+                let result = NodeSnapshot.handleTakeSnapshot ctx data
+                replyChannel.Reply()
+                return! postProcess ctx result |> agentLoop
         }

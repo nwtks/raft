@@ -196,42 +196,23 @@ let ``InstallSnapshotResponseMsg round-trips through JSON`` () =
     | _ -> Assert.Fail "Wrong message type"
 
 [<Fact>]
-let ``OptionConverter serializes None as null`` () =
-    let original =
-        RequestVoteMsg
-            { CandidateTerm = 42L
-              CandidateId = 7
-              LastLogIndex = 100L
-              LastLogTerm = 41L }
-
-    let deserialized = roundTrip original
-
-    match deserialized with
-    | RequestVoteMsg rv ->
-        Assert.Equal(42L, rv.CandidateTerm)
-        Assert.Equal(7, rv.CandidateId)
-        Assert.Equal(100L, rv.LastLogIndex)
-        Assert.Equal(41L, rv.LastLogTerm)
-    | _ -> Assert.Fail "Wrong message type"
+let ``OptionConverter.Read returns None for JSON null token`` () =
+    let converter = OptionConverter<int>()
+    let jsonBytes = System.Text.Encoding.UTF8.GetBytes "null"
+    let mutable reader = System.Text.Json.Utf8JsonReader(jsonBytes)
+    reader.Read() |> ignore
+    let result: int option = converter.Read(&reader, typeof<int option>, jsonOptions)
+    Assert.Equal(None, result)
 
 [<Fact>]
-let ``OptionConverter serializes and deserializes None`` () =
-    let value: int option = None
-    let json = System.Text.Json.JsonSerializer.Serialize(value, jsonOptions)
+let ``OptionConverter.Write writes null for None value`` () =
+    let converter = OptionConverter<int>()
+    use stream = new System.IO.MemoryStream()
+    use writer = new System.Text.Json.Utf8JsonWriter(stream)
+    converter.Write(writer, None, jsonOptions)
+    writer.Flush()
+    let json = System.Text.Encoding.UTF8.GetString(stream.ToArray())
     Assert.Equal("null", json)
-
-    let deserialized: int option =
-        System.Text.Json.JsonSerializer.Deserialize<int option>("null", jsonOptions)
-
-    Assert.True deserialized.IsNone
-
-    let rtValue: int option = None
-    let rtJson = System.Text.Json.JsonSerializer.Serialize(rtValue, jsonOptions)
-
-    let rtDeserialized: int option =
-        System.Text.Json.JsonSerializer.Deserialize<int option>(rtJson, jsonOptions)
-
-    Assert.Equal(None, rtDeserialized)
 
 [<Fact>]
 let ``OptionConverter round-trips Some string and numeric values`` () =
