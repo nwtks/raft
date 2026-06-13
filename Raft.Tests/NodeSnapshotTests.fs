@@ -4,21 +4,9 @@ open Xunit
 open Raft
 open TestHelpers
 
-let makeSnapshotCtx config state =
-    let inbox = new MailboxProcessor<NodeMessage>(fun _ -> async { () })
-
-    { Config = config
-      Transport = MockTransport() :> ITransport
-      Persistence = MockPersistence() :> IPersistence
-      OnApply = ignore
-      OnInstallSnapshot = ignore
-      OnGetSnapshotData = fun () -> "snap_data"
-      Inbox = inbox
-      State = state
-      ElectionTimer = None
-      HeartbeatTimer = None
-      CancellationTokenSource = new System.Threading.CancellationTokenSource()
-      PendingReads = [] }
+let private makeSnapshotCtx state =
+    { makeNodeContext state with
+        OnGetSnapshotData = fun () -> "snap_data" }
 
 [<Fact>]
 let ``NodeSnapshot.handleTakeSnapshot creates snapshot at lastApplied index with given data`` () =
@@ -26,11 +14,11 @@ let ``NodeSnapshot.handleTakeSnapshot creates snapshot at lastApplied index with
     state <- State.initLeaderState state
     state <- Replication.appendCommand "x" state
     state <- State.updateLastApplied 2L state
-    let ctx = makeSnapshotCtx dummyConfig state
 
+    let ctx = makeSnapshotCtx state
     let result = NodeSnapshot.handleTakeSnapshot ctx "test_data"
-
     Assert.True result.State.Persistent.Snapshot.IsSome
+
     let snap = result.State.Persistent.Snapshot.Value
     Assert.Equal(2L, snap.LastIncludedIndex)
     Assert.Equal("test_data", snap.StateMachineData)
@@ -42,8 +30,8 @@ let ``NodeSnapshot.handleTakeSnapshot trims log entries below snapshot index`` (
     state <- Replication.appendCommand "a" state
     state <- Replication.appendCommand "b" state
     state <- State.updateLastApplied 3L state
-    let ctx = makeSnapshotCtx dummyConfig state
 
+    let ctx = makeSnapshotCtx state
     let result = NodeSnapshot.handleTakeSnapshot ctx "data"
 
     let log = result.State.Persistent.Log
@@ -58,7 +46,8 @@ let ``NodeSnapshot.handleTakeSnapshot creates snapshot and preserves uncommitted
         State.initLeaderState (State.updateTerm 1L (State.init dummyConfig None))
 
     let leaderState = Replication.appendCommand "test-command" state
-    let ctx = makeSnapshotCtx dummyConfig leaderState
+
+    let ctx = makeSnapshotCtx leaderState
     let result = NodeSnapshot.handleTakeSnapshot ctx "snapshot-data"
     Assert.True result.State.Persistent.Snapshot.IsSome
     Assert.Equal("snapshot-data", result.State.Persistent.Snapshot.Value.StateMachineData)
@@ -75,7 +64,8 @@ let ``NodeSnapshot.handleTakeSnapshot with committed entries trims log`` () =
     leaderState <- Replication.appendCommand "cmd2" leaderState
     leaderState <- State.updateLastApplied 3L leaderState
     State.updateCommitIndex 3L leaderState |> ignore
-    let ctx = makeSnapshotCtx dummyConfig leaderState
+
+    let ctx = makeSnapshotCtx leaderState
     let result = NodeSnapshot.handleTakeSnapshot ctx "snap-data"
     Assert.True result.State.Persistent.Snapshot.IsSome
     Assert.Equal(3L, result.State.Persistent.Snapshot.Value.LastIncludedIndex)
@@ -96,7 +86,11 @@ let ``NodeSnapshot.autoSnapshotIfNeeded creates snapshot when log entry count re
     state <- Replication.appendCommand "x" state
     state <- Replication.appendCommand "y" state
     state <- State.updateLastApplied 3L state
-    let ctx = makeSnapshotCtx config state
+
+    let ctx =
+        { makeSnapshotCtx state with
+            Config = config }
+
     let result = NodeSnapshot.autoSnapshotIfNeeded ctx state
     Assert.True result.Persistent.Snapshot.IsSome
     Assert.Equal("snap_data", result.Persistent.Snapshot.Value.StateMachineData)
@@ -146,7 +140,10 @@ let ``NodeSnapshot.autoSnapshotIfNeeded uses existing snapshot lastIndex when co
                 { baseState.Volatile with
                     LastApplied = 5L } }
 
-    let ctx = makeSnapshotCtx config state
+    let ctx =
+        { makeSnapshotCtx state with
+            Config = config }
+
     let result = NodeSnapshot.autoSnapshotIfNeeded ctx state
     Assert.True result.Persistent.Snapshot.IsSome
     Assert.Equal("snap_data", result.Persistent.Snapshot.Value.StateMachineData)
@@ -154,7 +151,7 @@ let ``NodeSnapshot.autoSnapshotIfNeeded uses existing snapshot lastIndex when co
 [<Fact>]
 let ``NodeSnapshot.autoSnapshotIfNeeded is no-op when SnapshotAutoThreshold is 0`` () =
     let state = State.init dummyConfig None
-    let ctx = makeSnapshotCtx dummyConfig state
+    let ctx = makeSnapshotCtx state
     let result = NodeSnapshot.autoSnapshotIfNeeded ctx state
     Assert.Same(state, result)
 
@@ -165,6 +162,10 @@ let ``NodeSnapshot.autoSnapshotIfNeeded is no-op when log entry count is below t
             SnapshotAutoThreshold = 10 }
 
     let state = State.init config None
-    let ctx = makeSnapshotCtx config state
+
+    let ctx =
+        { makeSnapshotCtx state with
+            Config = config }
+
     let result = NodeSnapshot.autoSnapshotIfNeeded ctx state
     Assert.Same(state, result)

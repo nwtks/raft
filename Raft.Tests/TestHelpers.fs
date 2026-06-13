@@ -174,3 +174,31 @@ let replicateTo (followerId: NodeId) (leader: RaftState) (follower: RaftState) =
     let follower, resp = Replication.handleAppendEntries ae follower
     let leader = Replication.handleAppendEntriesResponse resp leader
     leader, follower
+
+let makeNodeContextWithTransport (state: RaftState) =
+    let transport = MockTransport()
+    let inbox = new MailboxProcessor<NodeMessage>(fun _ -> async { () })
+
+    let ctx: NodeContext =
+        { Config = dummyConfig
+          Transport = transport :> ITransport
+          Persistence = MockPersistence() :> IPersistence
+          OnApply = ignore
+          OnInstallSnapshot = ignore
+          OnGetSnapshotData = fun () -> ""
+          Inbox = inbox
+          State = state
+          ElectionTimer = None
+          HeartbeatTimer = None
+          CancellationTokenSource = new System.Threading.CancellationTokenSource()
+          PendingReads = [] }
+
+    ctx, transport
+
+let makeNodeContext (state: RaftState) =
+    let ctx, _ = makeNodeContextWithTransport state
+    ctx
+
+let makeDefaultNodeContext () =
+    let state = State.init dummyConfig None
+    makeNodeContext state

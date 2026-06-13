@@ -1,6 +1,15 @@
 namespace Raft
 
 module NodeTimeout =
+    let handleTimeoutWith receiveFn isElection ctx =
+        let state, action = receiveFn ctx
+        let remainingReads = NodeRead.processPendingReads ctx.PendingReads state
+
+        { State = state
+          ElectionAction = if isElection then action else Keep
+          HeartbeatAction = if isElection then Keep else action
+          PendingReads = remainingReads }
+
     let receiveElectionTimeout ctx =
         if ctx.State.Role = Leader then
             ctx.State, Keep
@@ -21,13 +30,7 @@ module NodeTimeout =
             finalState, Reset
 
     let handleElectionTimeout ctx =
-        let state, electionAction = receiveElectionTimeout ctx
-        let remainingReads = NodeRead.processPendingReads ctx.PendingReads state
-
-        { State = state
-          ElectionAction = electionAction
-          HeartbeatAction = Keep
-          PendingReads = remainingReads }
+        handleTimeoutWith receiveElectionTimeout true ctx
 
     let receiveHeartbeatTimeout ctx =
         if ctx.State.Role = Leader then
@@ -38,10 +41,4 @@ module NodeTimeout =
             ctx.State, Keep
 
     let handleHeartbeatTimeout ctx =
-        let state, heartbeatAction = receiveHeartbeatTimeout ctx
-        let remainingReads = NodeRead.processPendingReads ctx.PendingReads state
-
-        { State = state
-          ElectionAction = Keep
-          HeartbeatAction = heartbeatAction
-          PendingReads = remainingReads }
+        handleTimeoutWith receiveHeartbeatTimeout false ctx

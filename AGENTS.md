@@ -60,10 +60,12 @@ The entire codebase, including test code, must run on both Windows and Linux.
 - **Leverage discriminated unions** — Model domain concepts with DUs for exhaustiveness checking.
 - **Use `[<TailCall>]` on recursive functions** that loop to prevent stack overflows.
 - Do not introduce new external NuGet packages without checking existing dependencies in the `.fsproj` files first.
+- **Cyclomatic complexity** — Every function/method must keep its Coverlet complexity ≤ 15 (hard limit). Keep it ≤ 10 where practical. The `scripts/check-complexity.fsx` script checks this automatically from `coverage.cobertura.xml` after `dotnet test`. See `Directory.Build.props` for threshold configuration. If the check fails, split the function into smaller helpers or simplify branching.
 
 ## Testing Conventions
 
 - After any code change, run `dotnet test` and confirm **all tests pass**.
+- The `dotnet test` output includes a **Cyclomatic Complexity Report** (from coverage data). Check that no function exceeds complexity 15 (error threshold). Warnings above 10 should be addressed where practical.
 - Maintain high unit test coverage (target: ≥ 80% line coverage).If line coverage falls below 80%, add test code to restore it above the threshold before merging.
 - **Test ordering rules**:
   1. Within each test file, `[<Fact>]` functions must appear in the same order as the corresponding functions/methods/constructors in the source file under test.

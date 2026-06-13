@@ -115,6 +115,15 @@ module Replication =
             | None -> max Log.firstLogIndex resp.ConflictIndex
             | Some lastIdx -> max Log.firstLogIndex lastIdx
 
+    let onSameTermSuccess (resp: AppendEntriesResponse) leaderState state =
+        let newNextIndex, newMatchIndex = updateMatchIndices resp leaderState
+        State.updateLeaderState newNextIndex newMatchIndex state
+
+    let onSameTermFailure (resp: AppendEntriesResponse) leaderState state =
+        let newNext = calculateBackoffNextIndex resp state.Persistent.Log
+        let newNextIndex = leaderState.NextIndex |> Map.add resp.FollowerId newNext
+        State.updateLeaderState newNextIndex leaderState.MatchIndex state
+
     let handleAppendEntriesResponse (resp: AppendEntriesResponse) state =
         if resp.FollowerTerm > state.Persistent.CurrentTerm then
             State.updateTerm resp.FollowerTerm state
@@ -125,12 +134,9 @@ module Replication =
             | None -> state
             | Some ls ->
                 if resp.Success then
-                    let newNextIndex, newMatchIndex = updateMatchIndices resp ls
-                    State.updateLeaderState newNextIndex newMatchIndex state
+                    onSameTermSuccess resp ls state
                 else
-                    let newNext = calculateBackoffNextIndex resp state.Persistent.Log
-                    let newNextIndex = ls.NextIndex |> Map.add resp.FollowerId newNext
-                    State.updateLeaderState newNextIndex ls.MatchIndex state
+                    onSameTermFailure resp ls state
 
     let createInstallSnapshot followerId state =
         match state.LeaderState, state.Persistent.Snapshot with

@@ -189,11 +189,22 @@ module State =
                     CommitIndex = max state.Volatile.CommitIndex lastIndex
                     LastApplied = max state.Volatile.LastApplied lastIndex } }
 
+    let isDuplicateSession (table: Map<string, int64>) clientId seqNum =
+        match clientId, seqNum with
+        | Some cId, Some sNum -> table |> Map.tryFind cId |> Option.defaultValue -1L >= sNum
+        | _ -> false
+
     let updateSessionTable clientId seqNum state =
         { state with
             Persistent =
                 { state.Persistent with
                     SessionTable = state.Persistent.SessionTable |> Map.add clientId seqNum } }
+
+    let updateSessionIfNewer (table: Map<string, int64>) clientId seqNum state =
+        match clientId, seqNum with
+        | Some cId, Some sNum when table |> Map.tryFind cId |> Option.defaultValue -1L < sNum ->
+            updateSessionTable cId sNum state
+        | _ -> state
 
     let updateLastConfigIndex index state =
         { state with

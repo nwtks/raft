@@ -9,7 +9,7 @@ See [docs/trade-off.md](trade-off.md) for design trade-off analyses.
 
 ## Layer Overview
 
-The system is organized into three layers:
+The system is organized into four layers:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -52,36 +52,36 @@ The middle layer is built on F#'s `MailboxProcessor` (actor model). Each module 
 - Receives a `NodeContext` (which carries the actor's inbox, current state, timers, and injected dependencies)
 - Calls pure functions from the Algorithm Layer
 - Produces a `MessageResult` specifying the new state and timer actions
-- Relies on `NodeAgent.postProcess` to apply timer mutations and state updates
+- Relies on `NodeAgent.postProcess` to apply timer mutations, Config updates, and PendingRead updates to the context
 
 | Module | Responsibility |
 |---|---|
-| `NodeAgent.fs` | The tail-recursive `agentLoop` — the central dispatcher. Receives messages from the inbox, routes to the appropriate handler, calls `postProcess`, then tail-calls itself with the updated context |
-| `NodeRaft.fs` | Routes incoming `RaftMessage` discriminated union cases to the appropriate pure functions, calls `saveIfChanged`, sends responses via transport |
-| `NodeLocal.fs` | Handles client commands (`ClientCommand`), peer management (`AddPeer`/`RemovePeer`), broadcasts to followers, applies committed entries |
-| `NodeTimeout.fs` | Handles `ElectionTimeout` and `HeartbeatTimeout` — starts elections or sends heartbeats/append-entries |
-| `NodeRead.fs` | Implements the linearizable read protocol — broadcasts heartbeat, collects responses, serves reads when quorum confirms |
-| `NodeSnapshot.fs` | Handles manual and automatic snapshot creation, log trimming |
-| `NodeApply.fs` | `applyCommitted` — tail-recursively applies committed log entries to the state machine, handling config changes and session deduplication |
-| `NodeBroadcaster.fs` | Sends RPCs to all peers / non-voting peers (request-vote, heartbeat, append-entries, install-snapshot) |
-| `NodePromotion.fs` | Promotes non-voting peers to voting members when their log catches up; finalizes joint consensus configurations |
-| `NodeTimer.fs` | Centralized timer management — creates, resets, stops timers. Handlers never touch `System.Threading.Timer` directly; they return `TimerAction` values |
-| `NodeUtil.fs` | Helpers: `saveIfChanged` (idempotent persistence flush), `sendAsync` (fire-and-forget transport send with error logging) |
+| `NodeAgent.fs` | The tail-recursive `agentLoop` — the central dispatcher. Routes `ElectionTimeout`, `HeartbeatTimeout`, `RaftRPC`, `ClientCommand`, `AddPeer`, and `RemovePeer` to handler modules (which return `MessageResult`), calls `postProcess`, then tail-calls itself. Inline logic: `Shutdown` (disposes timers, cancels CTS, replies), `GetState` (replies with current state), `LinearizableRead` (Leader branch broadcasts heartbeat and creates `PendingRead`; non-Leader branch replies with `ReadRedirect`), and `TakeSnapshot` (calls handler, replies inline). `postProcess` applies `TimerAction`s to timers, replaces `State`/`ElectionTimer`/`HeartbeatTimer`/`PendingReads`, and syncs `Config` from `State.Config` when it changes. |
+| `NodeRaft.fs` | `handleRaftRPC` — routes incoming `RaftMessage` cases to pure functions (`Election.*`, `Replication.*`), calls `saveIfChanged`, then applies committed entries, auto-snapshot, config finalization, timer actions, and pending read updates. |
+| `NodeLocal.fs` | `handleLocalMessage` — dispatches `ClientCommand`, `AddPeer`, `RemovePeer`. On leader: appends entries, broadcasts, applies committed, and finalizes configuration. On non-leader: returns `Redirect` with leader info. |
+| `NodeTimeout.fs` | `handleElectionTimeout` — starts election (or promotes single-node cluster to leader). `handleHeartbeatTimeout` — sends heartbeats/append-entries and promotes non-voting peers. |
+| `NodeRead.fs` | `canServePendingRead`, `classifyPendingReads`, `processPendingReads`, `handleLinearizableRead` — linearizable read protocol. Broadcasts heartbeat, classifies pending reads as `ReadReady` or `ReadRedirect`, replies to resolved reads. |
+| `NodeSnapshot.fs` | `handleTakeSnapshot` (manual), `autoSnapshotIfNeeded` (threshold-based auto-compaction). |
+| `NodeApply.fs` | `applyCommitted` — tail-recursively applies committed log entries to the state machine via `loopApplyCommitted`. Handles config change entries (joint/final/legacy), skips `NoOpCommand` sentinel entries, applies session deduplication. |
+| `NodeBroadcaster.fs` | `broadcastRequestVote`, `broadcastHeartbeat`, `broadcastAppendEntries` (sends to both voting peers and `NonVotingPeers`), `sendAppendEntriesOrSnapshot` (falls back to `InstallSnapshot` when log is too far behind). |
+| `NodePromotion.fs` | `tryPromoteNonVotingPeers` — promotes non-voting peers whose `MatchIndex` catches up. `tryFinalizeConfiguration` — appends final configuration entry when in `JointPhase`. |
+| `NodeTimer.fs` | Centralized timer management — `getRandomElectionTimeout`, `createTimer`, `disposeTimer`, `applyElectionAction`, `applyHeartbeatAction`. `getTimerActionsOnRoleChange` returns `(TimerAction * TimerAction)` tuple based on old/new role transitions and whether a reply was sent. Handlers never touch `System.Threading.Timer` directly. |
+| `NodeUtil.fs` | `saveIfChanged` (idempotent persistence flush), `sendAsync` (fire-and-forget transport send with error logging), `log` (printfn wrapper). |
 
 ### 3. I/O / Infrastructure Layer
 
 | Module | Responsibility |
 |---|---|
-| `Transport.fs` | TCP listener and sender. Length-prefixed JSON framing. `TcpTransport` implements `ITransport` |
-| `Persistence.fs` | Atomic file persistence via temp-file swap. `FilePersistence` implements `IPersistence` |
-| `Serialization.fs` | Custom `System.Text.Json` converters for `RaftMessage` (tagged union) and `'T option` |
+| `Transport.fs` | TCP listener and sender. Length-prefixed (4-byte big-endian) JSON framing over `TcpClient`/`TcpListener`. `TcpTransport` implements `ITransport`. `sendMessage` uses a 3-second `CancellationTokenSource` timeout per send. `readAsync` is tail-recursive for exact-length reads. |
+| `Persistence.fs` | Atomic file persistence via `FileStream` + `Flush(true)` (fsync) + temp-file swap (`File.Move(..., overwrite=true)`). `FilePersistence` implements `IPersistence`, writing `state_{nodeId}.json` to the current working directory. Orphaned `.tmp` files from crashes are cleaned up on load. |
+| `Serialization.fs` | `OptionConverterFactory` (generic `'T option` converter) and `RaftMessageConverter` (uses `FSharpType.GetUnionCases` map + `FSharpValue.GetUnionFields` reflection to serialize/deserialize the `RaftMessage` tagged union). |
 
 ### 4. Application Layer
 
 | File | Responsibility |
 |---|---|
-| `Node.fs` | `RaftNode` class — public API. Constructs the `MailboxProcessor`, starts the transport listener and the agent loop. Exposes `SubmitCommand`, `LinearizableRead`, `AddPeer`, `RemovePeer`, etc. |
-| `Raft.App/Program.fs` | 3-node Key-Value Store demo with REPL |
+| `Node.fs` | `RaftNode` class — public API. Constructs the `MailboxProcessor`, starts the transport listener and the agent loop. Exposes `SubmitCommand`, `SubmitCommandWithSession`, `LinearizableRead`, `PostLinearizableRead`, `SubmitTakeSnapshot`, `AddPeer`, `RemovePeer`, `GetState`, `TriggerElectionTimeout`, `TriggerHeartbeatTimeout`. Constructor catches `SocketException`/`IOException` from `StartListener`, cleans up, and re-raises. Implements `IDisposable`. |
+| `Raft.App/Program.fs` | 3-node Key-Value Store demo with REPL. Commands: `put <key> <value>`, `get <key>` (via `LinearizableRead`), `state`, `quit`/`q`. |
 
 ---
 
@@ -114,8 +114,8 @@ sequenceDiagram
     NodeBroadcaster->>Peer: AppendEntries RPC
 
     NodeLocal->>NodeApply: applyCommitted
-    NodeApply->>Client: reply Accepted
-
+    Note over NodeLocal,Client: applyCommitted returns new state
+    NodeLocal->>Client: reply Accepted
     NodeLocal-->>agentLoop: MessageResult
 
     agentLoop->>agentLoop: postProcess (timer, reads)
@@ -131,17 +131,18 @@ A timeout flow follows a similar pattern — `ElectionTimeout` → `NodeTimeout.
 ### State Hierarchy
 
 ```
-NodeContext (mutable reference in agentLoop tail-call arg)
-├── Config (NodeConfig) — immutable after construction
-├── Transport, Persistence — injected dependencies
-├── OnApply, OnInstallSnapshot, OnGetSnapshotData — callbacks
-├── Inbox (MailboxProcessor)
-├── ElectionTimer, HeartbeatTimer (Timer option)
-├── CancellationTokenSource
-├── PendingReads (PendingRead list)
-└── State (RaftState) ← immutable state transitions
+NodeContext (tail-call argument in agentLoop — logically immutable, replaced each iteration)
+├── Config (NodeConfig) — synced from State.Config by postProcess when config changes occur
+├── Transport, Persistence — injected dependencies (immutable)
+├── OnApply, OnInstallSnapshot, OnGetSnapshotData — callbacks (immutable)
+├── Inbox (MailboxProcessor) — immutable
+├── ElectionTimer, HeartbeatTimer (Timer option) — replaced by postProcess via NodeTimer
+├── CancellationTokenSource — immutable
+├── PendingReads (PendingRead list) — replaced by postProcess from MessageResult
+└── State (RaftState) ← immutable value, replaced each iteration
     ├── Role (Follower | Candidate | Leader)
     ├── CurrentLeader (NodeId option)
+    ├── Config (NodeConfig) ← updated when config change entries are applied
     ├── ConfigPhase (SinglePhase | JointPhase)
     ├── NonVotingPeers (PeerInfo list)
     ├── VotesReceived (Set<NodeId>)
@@ -151,7 +152,7 @@ NodeContext (mutable reference in agentLoop tail-call arg)
     ├── Volatile (VolatileState)
     │   ├── CommitIndex
     │   └── LastApplied
-    └── Persistent (PersistentState) ← flushed to disk
+    └── Persistent (PersistentState) ← flushed to disk via saveIfChanged
         ├── CurrentTerm
         ├── VotedFor (NodeId option)
         ├── Log (Map<LogIndex, LogEntry>)
@@ -194,23 +195,26 @@ ctx.State  ──►  handler  ──►  newState (RaftState)
 
 ## Agent Loop Dispatch
 
-The `agentLoop` in `NodeAgent.fs` is a pure dispatcher:
+The `agentLoop` in `NodeAgent.fs` dispatches messages as follows:
 
 ```fsharp
 match msg with
-| Shutdown          → cleanup
+| Shutdown          → cleanup (inline: dispose timers, Cancel CTS)
 | ElectionTimeout   → NodeTimeout.handleElectionTimeout   |> postProcess |> agentLoop
 | HeartbeatTimeout  → NodeTimeout.handleHeartbeatTimeout  |> postProcess |> agentLoop
 | RaftRPC rpcMsg    → NodeRaft.handleRaftRPC              |> postProcess |> agentLoop
-| GetState          → reply + no state change
+| GetState          → reply ctx.State (inline, no state change)
 | ClientCommand/AddPeer/RemovePeer → NodeLocal.handleLocalMessage |> postProcess |> agentLoop
-| LinearizableRead  → NodeRead.handleLinearizableRead     |> postProcess |> agentLoop
-| TakeSnapshot      → NodeSnapshot.handleTakeSnapshot     |> postProcess |> agentLoop
+| LinearizableRead (Leader)    → inline: create PendingRead, call NodeRead.handleLinearizableRead |> postProcess |> agentLoop
+| LinearizableRead (non-Leader) → inline: reply ReadRedirect with leader info (no handler call)
+| TakeSnapshot      → NodeSnapshot.handleTakeSnapshot, reply, then postProcess |> agentLoop
 ```
 
-Every handler returns `MessageResult`. The `postProcess` function applies the timer actions (`TimerAction → Timer.Change/createTimer`) and updates `NodeContext`. The dispatcher has no inline logic except `Shutdown` teardown and `GetState` pass-through.
+`postProcess` applies timer actions (`TimerAction → Timer.Change/createTimer`), updates `Config` from `result.State.Config` (if changed), and updates `PendingReads`.
 
-This uniform dispatch makes adding a new message type straightforward:
+Most messages route to handler modules that return `MessageResult`. However, `LinearizableRead` (Leader branch) and `TakeSnapshot` are partially inlined in `agentLoop` before/after calling their handler modules. The non-Leader `LinearizableRead` branch is fully inlined with no handler call at all. `GetState` and `Shutdown` are also fully inlined.
+
+This makes adding a new message type straightforward:
 1. Add the case to `NodeMessage` DU
 2. Create a handler module returning `MessageResult`
 3. Add one `match` arm in `agentLoop`
@@ -311,14 +315,21 @@ graph TD
     NodeLocal --> NodeApply
     NodeLocal --> NodeSnapshot
     NodeLocal --> NodePromotion
+    NodeLocal --> NodeRead
+    NodeLocal --> State
+    NodeLocal --> Log
     NodeLocal --> NodeUtil
 
     NodeTimeout --> Election
     NodeTimeout --> NodeBroadcaster
     NodeTimeout --> NodeRead
+    NodeTimeout --> NodePromotion
     NodeTimeout --> State
+    NodeTimeout --> NodeUtil
 
     NodeRead --> NodeBroadcaster
+    NodeRead --> State
+    NodeRead --> Log
 
     NodeSnapshot --> State
     NodeSnapshot --> Log

@@ -4,29 +4,13 @@ open Xunit
 open Raft
 open TestHelpers
 
-let makeTestContext state : NodeContext =
-    let inbox = new MailboxProcessor<NodeMessage>(fun _ -> async { () })
-
-    { Config = dummyConfig
-      Transport = MockTransport() :> ITransport
-      Persistence = MockPersistence() :> IPersistence
-      OnApply = ignore
-      OnInstallSnapshot = ignore
-      OnGetSnapshotData = fun () -> ""
-      Inbox = inbox
-      State = state
-      ElectionTimer = None
-      HeartbeatTimer = None
-      CancellationTokenSource = new System.Threading.CancellationTokenSource()
-      PendingReads = [] }
-
 [<Fact>]
 let ``NodeTimeout.handleElectionTimeout promotes follower to leader in single-node cluster`` () =
     let config = { dummyConfig with Peers = [] }
     let state = State.init config None
 
     let ctx =
-        { makeTestContext state with
+        { makeNodeContext state with
             Config = config }
 
     let result = NodeTimeout.handleElectionTimeout ctx
@@ -40,7 +24,7 @@ let ``NodeTimeout.handleElectionTimeout is no-op on leader`` () =
     let state = State.init config None
 
     let ctx =
-        { makeTestContext state with
+        { makeNodeContext state with
             Config = config }
 
     let firstResult = NodeTimeout.handleElectionTimeout ctx
@@ -53,8 +37,7 @@ let ``NodeTimeout.handleElectionTimeout is no-op on leader`` () =
 
 [<Fact>]
 let ``NodeTimeout.handleHeartbeatTimeout is no-op on follower`` () =
-    let state = State.init dummyConfig None
-    let ctx = makeTestContext state
+    let ctx = makeDefaultNodeContext ()
     let result = NodeTimeout.handleHeartbeatTimeout ctx
     Assert.Equal(Follower, result.State.Role)
-    Assert.Equal(state.Persistent.CurrentTerm, result.State.Persistent.CurrentTerm)
+    Assert.Equal(ctx.State.Persistent.CurrentTerm, result.State.Persistent.CurrentTerm)

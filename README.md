@@ -12,7 +12,7 @@ This project implements the core mechanics of Raft — Leader Election and Log R
 |---------|------|-------------|
 | `Raft/` | Library | Core Raft consensus algorithm (election, replication, log, state machine, transport, persistence) |
 | `Raft.App/` | CLI App | 3-node Key-Value Store cluster demo with interactive REPL |
-| `Raft.Tests/` | Test Suite | 217 unit and integration tests (xUnit + Coverlet) |
+| `Raft.Tests/` | Test Suite | Unit and integration tests (xUnit + Coverlet) |
 
 ## Features
 
@@ -23,7 +23,7 @@ This project implements the core mechanics of Raft — Leader Election and Log R
 | Linearizable Reads | Quorum-based read index protocol |
 | Snapshot & Compaction | `InstallSnapshot` RPC, automatic log compaction |
 | Cluster Membership | Two-phase joint consensus for dynamic cluster changes |
-| Session De-duplication | Client-side session tracking prevents duplicate execution |
+| Session De-duplication | Server-side session tracking prevents duplicate command execution |
 | Interactive Demo | 3-node Key-Value Store cluster with REPL |
 | Comprehensive Tests | Unit/integration tests (xUnit + Coverlet) |
 

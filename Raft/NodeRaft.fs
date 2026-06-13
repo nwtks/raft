@@ -7,29 +7,26 @@ module NodeRaft =
         | None -> NodeUtil.log $"Warning: Unknown peer {peerId} — cannot send response"
 
     let handleRaftMessage ctx =
-        function
-        | RequestVoteMsg requestVote ->
-            let state, response = Election.handleRequestVote requestVote ctx.State
+        let reply (state, response) peerId wrapper =
             NodeUtil.saveIfChanged ctx state
-            sendResponse ctx requestVote.CandidateId (RequestVoteResponseMsg response)
+            sendResponse ctx peerId (wrapper response)
             state, true
-        | RequestVoteResponseMsg response ->
-            let state = Election.handleVoteResponse response.VoterId response ctx.State
+
+        let noReply state =
             NodeUtil.saveIfChanged ctx state
             state, false
-        | AppendEntriesMsg appendEntries ->
-            let state, response = Replication.handleAppendEntries appendEntries ctx.State
-            NodeUtil.saveIfChanged ctx state
-            sendResponse ctx appendEntries.LeaderId (AppendEntriesResponseMsg response)
-            state, true
-        | AppendEntriesResponseMsg response ->
-            let state =
-                Replication.handleAppendEntriesResponse response ctx.State
+
+        function
+        | RequestVoteMsg msg -> reply (Election.handleRequestVote msg ctx.State) msg.CandidateId RequestVoteResponseMsg
+        | RequestVoteResponseMsg msg -> noReply (Election.handleVoteResponse msg.VoterId msg ctx.State)
+        | AppendEntriesMsg msg ->
+            reply (Replication.handleAppendEntries msg ctx.State) msg.LeaderId AppendEntriesResponseMsg
+        | AppendEntriesResponseMsg msg ->
+            noReply (
+                Replication.handleAppendEntriesResponse msg ctx.State
                 |> Replication.advanceCommitIndex
                 |> NodePromotion.tryPromoteNonVotingPeers ctx
-
-            NodeUtil.saveIfChanged ctx state
-            state, false
+            )
         | InstallSnapshotMsg snap ->
             let state, response = Replication.handleInstallSnapshot snap ctx.State
             NodeUtil.saveIfChanged ctx state
@@ -46,13 +43,25 @@ module NodeRaft =
 
             sendResponse ctx snap.LeaderId (InstallSnapshotResponseMsg response)
             state, true
-        | InstallSnapshotResponseMsg response ->
-            let state =
-                Replication.handleInstallSnapshotResponse response ctx.State
+        | InstallSnapshotResponseMsg msg ->
+            noReply (
+                Replication.handleInstallSnapshotResponse msg ctx.State
                 |> Replication.advanceCommitIndex
+            )
 
-            NodeUtil.saveIfChanged ctx state
-            state, false
+    let updatePendingReads ctx state rpcMsg =
+        let updatedReads =
+            match rpcMsg with
+            | AppendEntriesResponseMsg resp when
+                state.Role = Leader && resp.FollowerTerm <= state.Persistent.CurrentTerm
+                ->
+                ctx.PendingReads
+                |> List.map (fun pendingRead ->
+                    { pendingRead with
+                        Responses = Set.add resp.FollowerId pendingRead.Responses })
+            | _ -> ctx.PendingReads
+
+        NodeRead.processPendingReads updatedReads state
 
     let handleRaftRPC ctx rpcMsg =
         let oldRole = ctx.State.Role
@@ -66,18 +75,7 @@ module NodeRaft =
         let electionAction, heartbeatAction =
             NodeTimer.getTimerActionsOnRoleChange ctx oldRole newState sendReply
 
-        let updatedReads =
-            match rpcMsg with
-            | AppendEntriesResponseMsg resp when
-                newState.Role = Leader && resp.FollowerTerm <= newState.Persistent.CurrentTerm
-                ->
-                ctx.PendingReads
-                |> List.map (fun pendingRead ->
-                    { pendingRead with
-                        Responses = Set.add resp.FollowerId pendingRead.Responses })
-            | _ -> ctx.PendingReads
-
-        let remainingReads = NodeRead.processPendingReads updatedReads newState
+        let remainingReads = updatePendingReads ctx newState rpcMsg
 
         { State = newState
           ElectionAction = electionAction

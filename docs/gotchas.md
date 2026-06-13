@@ -29,9 +29,9 @@ Every `MessageResult` must explicitly set both `ElectionAction` and `HeartbeatAc
 
 ## `Async.Start` Fire-and-Forget Error Handling
 
-`NodeUtil.sendAsync` and the `onInstallSnapshot` callback both use `Async.Start` for fire-and-forget execution. Exceptions are caught and logged, but the caller receives no notification of failure.
+`NodeUtil.sendAsync` uses `Async.Start` for fire-and-forget execution. Synchronous exceptions thrown by `transport.SendMessage` are wrapped into a failed `Async<unit>` via `async { return raise ex }`, then caught by the inner `async { try...with }` block and logged. The `onInstallSnapshot` callback also uses `Async.Start` with error handling.
 
-**Why it's problematic**: A failure to send a message to a peer (e.g., connection refused, timeout) is silently logged and ignored. The Raft protocol is designed to tolerate lost messages (retries via heartbeat), but silent failures can mask network partition issues during debugging.
+**Why it's problematic**: A failure to send a message to a peer (e.g., connection refused, timeout) is logged but the caller receives no notification of failure. The Raft protocol is designed to tolerate lost messages (retries via heartbeat), but silent failures can mask network partition issues during debugging.
 
 **How to avoid**: For debugging, monitor the `[Node]` / `[Transport]` log output. In tests, use `MockTransport` which never fails — real network failures are only exercised in `TransportTests.fs`.
 
@@ -45,6 +45,8 @@ Every `MessageResult` must explicitly set both `ElectionAction` and `HeartbeatAc
 
 **How to avoid**: Never call `PostAndReply` from within a handler. If a handler needs to query state, use the `ctx.State` value already in scope. If a handler needs to send a message to itself, use `ctx.Inbox.Post` (fire-and-forget) instead. For external-facing APIs, always use `PostAndReply` from outside the agent.
 
+**Current implementation**: The `RaftNode` public API methods (`SubmitCommand`, `LinearizableRead`, `AddPeer`, etc.) all use `PostAndReply` from external threads. Handler modules in the Agent Layer (e.g., `NodeLocal.handleLocalMessage`) reply directly via `AsyncReplyChannel.Reply()` without blocking.
+
 ---
 
 ## Timer Disposal Order on Shutdown
@@ -54,6 +56,8 @@ In the `Shutdown` handler, the election timer is disposed first, then the heartb
 **Why it's problematic**: If `CancellationTokenSource.Cancel()` were called before timer disposal, a timer callback could fire during shutdown and try to `Post` a message to a stopped/disposed `MailboxProcessor`. The current order prevents this.
 
 **How to avoid**: When adding new resources that need cleanup in `Shutdown`, dispose timers and other resources **before** calling `Cancel()` on the `CancellationTokenSource`.
+
+**Current implementation**: `NodeAgent.agentLoop` handles `Shutdown` by disposing `ctx.ElectionTimer` and `ctx.HeartbeatTimer` (both `System.Threading.Timer option`), then calling `ctx.CancellationTokenSource.Cancel()`. The `RaftNode.Dispose()` method posts `Shutdown` and waits for reply via `PostAndReply`, then disposes the `CancellationTokenSource` and agent.
 
 ---
 
@@ -69,6 +73,8 @@ Two sentinel values exist for log index arithmetic:
 **Why it's problematic**: Many functions use `initialLogIndex` as a special case (e.g., `isLogConsistent` checks `prevLogIndex = initialLogIndex` to skip consistency check). Mixing them up causes off-by-one errors — for example, using `initialLogIndex` where `firstLogIndex` is expected can cause incorrect conflict index calculations.
 
 **How to avoid**: When checking "is this a valid real log index?", compare against `firstLogIndex`. When checking "is this the sentinel empty value?", compare against `initialLogIndex`. When computing `nextIndex - 1L`, the result may be `initialLogIndex` for a brand-new follower — that is correct and expected.
+
+**Additional constants**: `Log.initialTerm = 0L` (initial term value), `Log.NoOpCommand = ""` (sentinel command for no-op entries and snapshot placeholders).
 
 ---
 
@@ -116,11 +122,11 @@ When `exitJointConsensus` processes a `FinalChange` that removes the current lea
 
 ## `Task<T>` / `ValueTask<T>` to `Async<T>` Conversion
 
-.NET APIs returning `Task<T>` or `ValueTask<T>` require explicit conversion. The pattern used throughout is `.AsTask() |> Async.AwaitTask`. F# 10 does not have `Async.AwaitValueTask`.
+.NET APIs returning `Task<T>` or `ValueTask<T>` require explicit conversion to F# `Async<T>`. The primary pattern is `|> Async.AwaitTask` for `Task<T>` APIs (e.g., `ReadAsync`) and `.AsTask() |> Async.AwaitTask` for `ValueTask<T>` APIs (e.g., `ConnectAsync`, `WriteAsync`). Some `ValueTask<T>` APIs (`AcceptTcpClientAsync`) are directly awaitable with `Async.AwaitTask` in F# 10.
 
-**Why it's problematic**: `ValueTask<T>` (returned by newer .NET APIs like `ConnectAsync` with `CancellationToken`) must be converted to `Task<T>` via `.AsTask()` before awaiting. Forgetting `.AsTask()` causes a type error. Accidentally using the synchronous overload (e.g., `stream.Write` instead of `stream.WriteAsync`) bypasses async I/O.
+**Why it's problematic**: `ValueTask<T>` (returned by newer .NET APIs like `ConnectAsync` with `CancellationToken`) usually must be converted to `Task<T>` via `.AsTask()` before awaiting. Forgetting `.AsTask()` may cause a type error, though F# 10's `Async.AwaitTask` accepts some `ValueTask<T>` overloads directly. Accidentally using the synchronous overload (e.g., `stream.Write` instead of `stream.WriteAsync`) bypasses async I/O.
 
-**How to avoid**: Always use the `Async` suffix methods and chain `.AsTask() |> Async.AwaitTask`. When calling .NET APIs, check the return type in your IDE and add both conversions if needed. Keep the pattern consistent with the existing code in `Transport.fs`.
+**How to avoid**: Always use the `Async` suffix methods. When calling .NET APIs, check the return type in your IDE — use `.AsTask() |> Async.AwaitTask` for `ValueTask<T>` when `Async.AwaitTask` alone doesn't compile. Keep the pattern consistent with the existing code in `Transport.fs`.
 
 ---
 
@@ -136,11 +142,11 @@ When `exitJointConsensus` processes a `FinalChange` that removes the current lea
 
 ## `tryPromoteNonVotingPeers` Side Effects
 
-`NodePromotion.tryPromoteNonVotingPeers` calls `NodeUtil.saveIfChanged`, `NodeBroadcaster.broadcastAppendEntries`, `NodeApply.applyCommitted`, and `NodeSnapshot.autoSnapshotIfNeeded` inline — all within the handler's synchronous flow.
+`NodePromotion.tryPromoteNonVotingPeers` calls `NodeUtil.saveIfChanged`, `NodeBroadcaster.broadcastAppendEntries`, `NodeApply.applyCommitted`, `NodeSnapshot.autoSnapshotIfNeeded`, and `NodePromotion.tryFinalizeConfiguration` inline — all within the handler's synchronous flow.
 
-**Why it's problematic**: This function has significant side effects beyond simple state transformation. It's called from `NodeRaft.handleRaftMessage` (on `AppendEntriesResponseMsg`) and `NodeTimeout.receiveHeartbeatTimeout`. These side effects happen during message processing, which is correct but can make debugging non-deterministic behavior harder because promotion can cascade into further state changes.
+**Why it's problematic**: This function has significant side effects beyond simple state transformation. It's called from `NodeRaft.handleRaftMessage` (on `AppendEntriesResponseMsg`) and `NodeTimeout.receiveHeartbeatTimeout`. These side effects happen during message processing, which is correct but can make debugging non-deterministic behavior harder because promotion can cascade into further state changes including config finalization.
 
-**How to avoid**: When debugging unexpected state transitions, consider that `tryPromoteNonVotingPeers` may be triggering configuration changes as a side effect of normal log replication responses. The finalization of a joint consensus is handled by `tryFinalizeConfiguration`, which is called separately in `handleRaftRPC` and `handleLocalMessage`.
+**How to avoid**: When debugging unexpected state transitions, consider that `tryPromoteNonVotingPeers` may be triggering configuration changes as a side effect of normal log replication responses. `tryFinalizeConfiguration` is also called independently in `handleRaftRPC` and `handleLocalMessage` for non-promotion-triggered config finalization.
 
 ---
 

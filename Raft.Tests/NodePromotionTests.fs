@@ -78,21 +78,10 @@ let ``NodePromotion.tryFinalizeConfiguration is no-op when last entry is already
 let ``NodePromotion.tryPromoteNonVotingPeers promotes caught-up non-voting peer`` () =
     let config = configWithPeers 1 0
     let state = State.initLeaderState (State.init config None)
-    let transport = MockTransport()
 
     let ctx =
-        { Config = config
-          Transport = transport :> ITransport
-          Persistence = MockPersistence() :> IPersistence
-          OnApply = ignore
-          OnInstallSnapshot = ignore
-          OnGetSnapshotData = fun () -> ""
-          Inbox = new MailboxProcessor<NodeMessage>(fun _ -> async { () })
-          State = state
-          ElectionTimer = None
-          HeartbeatTimer = None
-          CancellationTokenSource = new System.Threading.CancellationTokenSource()
-          PendingReads = [] }
+        { makeNodeContext state with
+            Config = config }
 
     let newPeer = { Id = 4; Host = "127.0.0.1"; Port = 0 }
 

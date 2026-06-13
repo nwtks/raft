@@ -3,12 +3,7 @@ namespace Raft
 module NodeApply =
     let applyConfigChangeEntry entry state =
         let stateWithSession =
-            match entry.ClientId, entry.SeqNum with
-            | Some cId, Some sNum when
-                state.Persistent.SessionTable |> Map.tryFind cId |> Option.defaultValue -1L < sNum
-                ->
-                State.updateSessionTable cId sNum state
-            | _ -> state
+            State.updateSessionIfNewer state.Persistent.SessionTable entry.ClientId entry.SeqNum state
 
         let stateWithIndex = State.updateLastConfigIndex entry.Index stateWithSession
 
@@ -22,19 +17,10 @@ module NodeApply =
 
     let applyNormalEntry onApply entry state =
         let isDuplicate =
-            match entry.ClientId, entry.SeqNum with
-            | Some cId, Some sNum ->
-                state.Persistent.SessionTable |> Map.tryFind cId |> Option.defaultValue -1L
-                >= sNum
-            | _ -> false
+            State.isDuplicateSession state.Persistent.SessionTable entry.ClientId entry.SeqNum
 
         let newState =
-            if isDuplicate then
-                state
-            elif entry.ClientId.IsSome && entry.SeqNum.IsSome then
-                State.updateSessionTable entry.ClientId.Value entry.SeqNum.Value state
-            else
-                state
+            State.updateSessionIfNewer state.Persistent.SessionTable entry.ClientId entry.SeqNum state
 
         if not isDuplicate then
             onApply entry

@@ -12,45 +12,39 @@ module NodeTimer =
         | Some t -> t.Dispose()
         | None -> ()
 
-    let applyElectionAction ctx =
-        function
-        | Keep -> ctx.ElectionTimer
+    let applyTimerAction (getTimer: NodeContext -> System.Threading.Timer option) getInterval createMsg ctx action =
+        match action with
+        | Keep -> getTimer ctx
         | Reset ->
-            let interval = getRandomElectionTimeout ctx.Config
+            let interval = getInterval ctx
 
-            match ctx.ElectionTimer with
+            match getTimer ctx with
             | Some t ->
                 t.Change(interval, System.Threading.Timeout.Infinite) |> ignore
-                ctx.ElectionTimer
-            | None -> Some(createTimer ctx.Inbox ElectionTimeout interval)
+                getTimer ctx
+            | None -> Some(createTimer ctx.Inbox createMsg interval)
         | Stop ->
-            match ctx.ElectionTimer with
+            match getTimer ctx with
             | Some t ->
                 t.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite)
                 |> ignore
             | None -> ()
 
-            ctx.ElectionTimer
+            getTimer ctx
+
+    let applyElectionAction ctx =
+        applyTimerAction
+            (fun ctx -> ctx.ElectionTimer)
+            (fun ctx -> getRandomElectionTimeout ctx.Config)
+            ElectionTimeout
+            ctx
 
     let applyHeartbeatAction ctx =
-        function
-        | Keep -> ctx.HeartbeatTimer
-        | Reset ->
-            let interval = ctx.Config.HeartbeatIntervalMs
-
-            match ctx.HeartbeatTimer with
-            | Some t ->
-                t.Change(interval, System.Threading.Timeout.Infinite) |> ignore
-                ctx.HeartbeatTimer
-            | None -> Some(createTimer ctx.Inbox HeartbeatTimeout interval)
-        | Stop ->
-            match ctx.HeartbeatTimer with
-            | Some t ->
-                t.Change(System.Threading.Timeout.Infinite, System.Threading.Timeout.Infinite)
-                |> ignore
-            | None -> ()
-
-            ctx.HeartbeatTimer
+        applyTimerAction
+            (fun ctx -> ctx.HeartbeatTimer)
+            (fun ctx -> ctx.Config.HeartbeatIntervalMs)
+            HeartbeatTimeout
+            ctx
 
     let getTimerActionsOnRoleChange ctx oldRole newState sendReply =
         if oldRole <> Leader && newState.Role = Leader then

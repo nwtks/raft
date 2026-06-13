@@ -15,18 +15,18 @@ module NodePromotion =
             | _ -> Replication.appendFinalConfiguration newPeers state
         | _ -> state
 
-    let tryPromoteNonVotingPeers ctx state =
-        if state.Role = Leader && not (List.isEmpty state.NonVotingPeers) then
+    let getReadyPeers state =
+        match state.LeaderState with
+        | Some ls ->
             let lastIndex = Log.lastIndex state.Persistent.Log
 
-            let readyPeers =
-                state.NonVotingPeers
-                |> List.filter (fun p ->
-                    match state.LeaderState with
-                    | Some ls -> ls.MatchIndex |> Map.tryFind p.Id |> Option.defaultValue -1L >= lastIndex
-                    | None -> false)
+            state.NonVotingPeers
+            |> List.filter (fun p -> ls.MatchIndex |> Map.tryFind p.Id |> Option.defaultValue -1L >= lastIndex)
+        | None -> []
 
-            match readyPeers with
+    let tryPromoteNonVotingPeers ctx state =
+        if state.Role = Leader && not (List.isEmpty state.NonVotingPeers) then
+            match getReadyPeers state with
             | [] -> state
             | readyPeers ->
                 let caughtUpIds = readyPeers |> List.map (fun p -> p.Id) |> Set.ofList
@@ -44,7 +44,9 @@ module NodePromotion =
 
                 NodeUtil.saveIfChanged ctx newState
                 NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport newState
-                let appliedState = NodeApply.applyCommitted ctx.OnApply newState
-                tryFinalizeConfiguration (NodeSnapshot.autoSnapshotIfNeeded ctx appliedState)
+
+                NodeApply.applyCommitted ctx.OnApply newState
+                |> NodeSnapshot.autoSnapshotIfNeeded ctx
+                |> tryFinalizeConfiguration
         else
             state

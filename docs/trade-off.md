@@ -16,7 +16,7 @@ See [docs/gotchas.md](gotchas.md) for common mistakes and gotchas.
 **Trade-offs**:
 - ✅ `NodeUtil.sendAsync` simplified from `Task.ContinueWith` to `async { try...with } |> Async.Start`, making error handling declarative
 - ✅ Tests (`MockTransport`) no longer need `Task.FromResult` — `async { return () }` is cleaner
-- ❌ Every call to a .NET `Task<T>` / `ValueTask<T>` API (`ConnectAsync`, `WriteAsync`, etc.) requires `.AsTask() |> Async.AwaitTask`. F# 10 does not have `Async.AwaitValueTask`, so explicit conversion is unavoidable
+- ❌ Calls to .NET `ValueTask<T>` APIs (`ConnectAsync`, `WriteAsync`) require `.AsTask() |> Async.AwaitTask` conversion. `Task<T>` APIs (`ReadAsync`) and some `ValueTask<T>` APIs (`AcceptTcpClientAsync`) are awaitable directly with `Async.AwaitTask` in F# 10, but the conversion pattern is inconsistently needed across the BCL
 - ❌ C# consumers cannot use the interface directly (acceptable since this is a pure F# project)
 
 ---
@@ -28,11 +28,12 @@ See [docs/gotchas.md](gotchas.md) for common mistakes and gotchas.
 **Rationale**: Before this pattern, `agentLoop` inlined timer handling, pending-read processing, and Config tracking between handler calls. Duplicated logic across message branches.
 
 **Trade-offs**:
-- ✅ `agentLoop` is now a pure dispatcher — match msg, call handler, `postProcess`, tail-call. No inline logic except Shutdown/GetState.
-- ✅ Adding a new message type requires only a new handler module + one line in `agentLoop`.
+- ✅ `agentLoop` is mostly a dispatcher — most messages route to handler modules returning `MessageResult`, which `postProcess` then applies. Only `Shutdown`, `GetState`, `LinearizableRead` (both Leader and non-Leader branches), and `TakeSnapshot` reply have inline logic.
+- ✅ Adding a new message type typically requires only a new handler module + one line in `agentLoop`.
 - ✅ Timer mutation, Config tracking, and PendingRead processing are unified in one place (`postProcess`), not duplicated across branches.
 - ❌ `MessageResult` creation in each handler is slightly more verbose than directly mutating `ctx` fields.
 - ❌ `postProcess` is an additional indirection layer; understanding the full message lifecycle requires tracing through handler → `MessageResult` → `postProcess`.
+- ❌ Some messages (`LinearizableRead` Leader branch, `TakeSnapshot`) are partially inlined in `agentLoop` before/after calling their handler modules, breaking the uniform dispatch pattern.
 
 ---
 
@@ -75,3 +76,20 @@ See [docs/gotchas.md](gotchas.md) for common mistakes and gotchas.
 - ✅ Only the conflicting suffix is removed; the rest of the map is unchanged.
 - ✅ Same O(m log n) worst case as the old approach, but better constant factors when the conflict is near the end.
 - ❌ Slightly more code than the one-liner `Map.toSeq` + `Map.ofSeq`.
+
+---
+
+## Cyclomatic Complexity via Coverlet Coverage Data
+
+The codebase uses Coverlet's `complexity` attribute (emitted in `coverage.cobertura.xml`) as an automated cyclomatic complexity gate, rather than a separate Roslyn-based analyzer.
+
+**Rationale**: `Microsoft.CodeAnalysis.Metrics` (Roslyn-based) does not support F# projects. Coverlet, already in the build pipeline for coverage, computes a branch-count-based metric from the compiled IL that correlates closely with McCabe's cyclomatic complexity. Reusing this data avoids introducing a new tool or analysis pass.
+
+**Trade-offs**:
+- ✅ No new dependencies — Coverlet is already a project dependency.
+- ✅ F# compatible — Coverlet operates on compiled IL, not source language.
+- ✅ One unified report — coverage and complexity from a single `dotnet test` run.
+- ✅ MSBuild integration — the `CheckComplexityAfterCoverage` target hooks into Coverlet's `GenerateCoverageResultAfterTest` target.
+- ❌ Coverlet's complexity is IL branch-count-based, which can differ from source-level McCabe CC for F# constructs (closures, computation expressions).
+- ❌ F# closures compiled as nested classes produce `Invoke` methods whose names don't directly map to the source function name (e.g., `NodeRaft/handleRaftMessage@19`).
+- ❌ `dotnet test` exit code may not reflect the complexity check error in all SDK versions — CI scripts should use the explicit command `dotnet fsi scripts/check-complexity.fsx` for reliable enforcement.
