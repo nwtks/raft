@@ -56,9 +56,9 @@ The middle layer is built on F#'s `MailboxProcessor` (actor model). Each module 
 
 | Module | Responsibility |
 |---|---|
-| `NodeAgent.fs` | The tail-recursive `agentLoop` — the central dispatcher. Routes `ElectionTimeout`, `HeartbeatTimeout`, `RaftRPC`, `ClientCommand`, `AddPeer`, and `RemovePeer` to handler modules (which return `MessageResult`), calls `postProcess`, then tail-calls itself. Inline logic: `Shutdown` (disposes timers, cancels CTS, replies), `GetState` (replies with current state), `LinearizableRead` (Leader branch broadcasts heartbeat and creates `PendingRead`; non-Leader branch replies with `ReadRedirect`), and `TakeSnapshot` (calls handler, replies inline). `postProcess` applies `TimerAction`s to timers, replaces `State`/`ElectionTimer`/`HeartbeatTimer`/`PendingReads`, and syncs `Config` from `State.Config` when it changes. |
+| `NodeAgent.fs` | The tail-recursive `agentLoop` — the central dispatcher. `Shutdown` is handled directly in `agentLoop` (disposes timers, cancels CTS, replies). All other messages route through `handleMessage`, which dispatches to handler modules (returning `MessageResult`) or handles `GetState`, `LinearizableRead`, and `TakeSnapshot` directly. Results flow through `postProcess` which applies timer actions, Config updates, and PendingRead updates before tail-calling. |
 | `NodeRaft.fs` | `handleRaftRPC` — routes incoming `RaftMessage` cases to pure functions (`Election.*`, `Replication.*`), calls `saveIfChanged`, then applies committed entries, auto-snapshot, config finalization, timer actions, and pending read updates. |
-| `NodeLocal.fs` | `handleLocalMessage` — dispatches `ClientCommand`, `AddPeer`, `RemovePeer`. On leader: appends entries, broadcasts, applies committed, and finalizes configuration. On non-leader: returns `Redirect` with leader info. |
+| `NodeLocal.fs` | `handleLocalMessage` — dispatches `ClientCommand`, `AddPeer`, `RemovePeer` via `dispatchLocalMessage`. Each branch replies directly to the caller via the function-type callback embedded in the message. On leader: appends entries, broadcasts, applies committed, auto-snapshots, and finalizes configuration. On non-leader: returns `Redirect` with leader info. Also processes pending reads and returns `MessageResult` with timer actions. |
 | `NodeTimeout.fs` | `handleElectionTimeout` — starts election (or promotes single-node cluster to leader). `handleHeartbeatTimeout` — sends heartbeats/append-entries and promotes non-voting peers. |
 | `NodeRead.fs` | `canServePendingRead`, `classifyPendingReads`, `processPendingReads`, `handleLinearizableRead` — linearizable read protocol. Broadcasts heartbeat, classifies pending reads as `ReadReady` or `ReadRedirect`, replies to resolved reads. |
 | `NodeSnapshot.fs` | `handleTakeSnapshot` (manual), `autoSnapshotIfNeeded` (threshold-based auto-compaction). |
@@ -199,25 +199,26 @@ The `agentLoop` in `NodeAgent.fs` dispatches messages as follows:
 
 ```fsharp
 match msg with
-| Shutdown          → cleanup (inline: dispose timers, Cancel CTS)
-| ElectionTimeout   → NodeTimeout.handleElectionTimeout   |> postProcess |> agentLoop
-| HeartbeatTimeout  → NodeTimeout.handleHeartbeatTimeout  |> postProcess |> agentLoop
-| RaftRPC rpcMsg    → NodeRaft.handleRaftRPC              |> postProcess |> agentLoop
-| GetState          → reply ctx.State (inline, no state change)
-| ClientCommand/AddPeer/RemovePeer → NodeLocal.handleLocalMessage |> postProcess |> agentLoop
-| LinearizableRead (Leader)    → inline: create PendingRead, call NodeRead.handleLinearizableRead |> postProcess |> agentLoop
-| LinearizableRead (non-Leader) → inline: reply ReadRedirect with leader info (no handler call)
-| TakeSnapshot      → NodeSnapshot.handleTakeSnapshot, reply, then postProcess |> agentLoop
+| Shutdown reply    → handleShutdown ctx reply
+| _                 → handleMessage ctx msg |> postProcess ctx |> agentLoop
 ```
+
+`handleMessage` dispatches:
+- `ElectionTimeout` / `HeartbeatTimeout` → `NodeTimeout.handleElectionTimeout` / `handleHeartbeatTimeout`
+- `RaftRPC rpcMsg` → `NodeRaft.handleRaftRPC`
+- `GetState` → inline reply + `MessageResult`
+- `LinearizableRead` → inline: Leader creates `PendingRead` and calls `NodeRead.handleLinearizableRead`; non-Leader replies `ReadRedirect`
+- `TakeSnapshot` → `NodeSnapshot.handleTakeSnapshot`, replies, returns `MessageResult`
+- `ClientCommand` / `AddPeer` / `RemovePeer` → `NodeLocal.handleLocalMessage`
 
 `postProcess` applies timer actions (`TimerAction → Timer.Change/createTimer`), updates `Config` from `result.State.Config` (if changed), and updates `PendingReads`.
 
-Most messages route to handler modules that return `MessageResult`. However, `LinearizableRead` (Leader branch) and `TakeSnapshot` are partially inlined in `agentLoop` before/after calling their handler modules. The non-Leader `LinearizableRead` branch is fully inlined with no handler call at all. `GetState` and `Shutdown` are also fully inlined.
+Only `Shutdown` is handled entirely outside `handleMessage` and `postProcess` — it disposes timers, cancels the `CancellationTokenSource`, replies, and terminates the loop.
 
 This makes adding a new message type straightforward:
 1. Add the case to `NodeMessage` DU
 2. Create a handler module returning `MessageResult`
-3. Add one `match` arm in `agentLoop`
+3. Add one `match` arm in `handleMessage`
 
 ---
 
@@ -248,7 +249,7 @@ Messages are serialized as JSON using custom `System.Text.Json` converters (`Raf
 
 TCP connection timeout for outbound messages is **3 000 ms** (hardcoded in `Transport.sendMessage`).
 
-`ClientCommand` (the `AsyncReplyChannel` case) is never sent over the wire — it is only posted locally to the inbox.
+`NodeMessage` cases that carry reply callbacks (`ClientCommand`, `LinearizableRead`, `GetState`, `TakeSnapshot`, `AddPeer`, `RemovePeer`, `Shutdown`) are never sent over the wire — they are only posted locally to the inbox.
 
 ---
 

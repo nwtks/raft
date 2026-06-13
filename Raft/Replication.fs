@@ -108,12 +108,14 @@ module Replication =
         newNextIndex, newMatchIndex
 
     let calculateBackoffNextIndex (resp: AppendEntriesResponse) log =
-        if resp.ConflictTerm = Log.initialTerm then
-            max Log.firstLogIndex resp.ConflictIndex
-        else
-            match Log.lastIndexOfTerm resp.ConflictTerm log with
-            | None -> max Log.firstLogIndex resp.ConflictIndex
-            | Some lastIdx -> max Log.firstLogIndex lastIdx
+        let idx =
+            if resp.ConflictTerm = Log.initialTerm then
+                resp.ConflictIndex
+            else
+                Log.lastIndexOfTerm resp.ConflictTerm log
+                |> Option.defaultValue resp.ConflictIndex
+
+        max Log.firstLogIndex idx
 
     let onSameTermSuccess (resp: AppendEntriesResponse) leaderState state =
         let newNextIndex, newMatchIndex = updateMatchIndices resp leaderState
@@ -131,12 +133,9 @@ module Replication =
             state
         else
             match state.LeaderState with
+            | Some ls when resp.Success -> onSameTermSuccess resp ls state
+            | Some ls -> onSameTermFailure resp ls state
             | None -> state
-            | Some ls ->
-                if resp.Success then
-                    onSameTermSuccess resp ls state
-                else
-                    onSameTermFailure resp ls state
 
     let createInstallSnapshot followerId state =
         match state.LeaderState, state.Persistent.Snapshot with

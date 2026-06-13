@@ -15,7 +15,7 @@ let ``NodeRead.canServePendingRead returns true when leader has committed entry 
 
     let pendingRead: PendingRead =
         { ReadIndex = 1L
-          ReplyChannel = Unchecked.defaultof<_>
+          Reply = ignore
           Responses = Set.ofList [ 1; 2; 3 ] }
 
     Assert.True(NodeRead.canServePendingRead state pendingRead)
@@ -26,7 +26,7 @@ let ``NodeRead.canServePendingRead returns false when node is not leader`` () =
 
     let pendingRead: PendingRead =
         { ReadIndex = 1L
-          ReplyChannel = Unchecked.defaultof<_>
+          Reply = ignore
           Responses = Set.ofList [ 1; 2; 3 ] }
 
     Assert.False(NodeRead.canServePendingRead state pendingRead)
@@ -37,7 +37,7 @@ let ``NodeRead.canServePendingRead returns false when commit index is 0`` () =
 
     let pendingRead: PendingRead =
         { ReadIndex = 0L
-          ReplyChannel = Unchecked.defaultof<_>
+          Reply = ignore
           Responses = Set.ofList [ 1; 2; 3 ] }
 
     Assert.False(NodeRead.canServePendingRead state pendingRead)
@@ -56,7 +56,7 @@ let ``NodeRead.canServePendingRead returns false when commit index term != curre
 
     let pendingRead: PendingRead =
         { ReadIndex = 1L
-          ReplyChannel = Unchecked.defaultof<_>
+          Reply = ignore
           Responses = Set.ofList [ 1; 2; 3 ] }
 
     Assert.False(NodeRead.canServePendingRead state pendingRead)
@@ -71,7 +71,7 @@ let ``NodeRead.canServePendingRead returns false when peer quorum is not reached
 
     let pendingRead: PendingRead =
         { ReadIndex = 1L
-          ReplyChannel = Unchecked.defaultof<_>
+          Reply = ignore
           Responses = Set.ofList [ 1 ] }
 
     Assert.False(NodeRead.canServePendingRead state pendingRead)
@@ -84,7 +84,7 @@ let ``NodeRead.classifyPendingReads resolves read on leader when quorum reached 
 
     let pendingRead: PendingRead =
         { ReadIndex = 1L
-          ReplyChannel = Unchecked.defaultof<_>
+          Reply = ignore
           Responses = Set.ofList [ 1; 2; 3 ] }
 
     let remaining, resolved = NodeRead.classifyPendingReads [ pendingRead ] state
@@ -101,7 +101,7 @@ let ``NodeRead.classifyPendingReads keeps pending read when quorum not reached``
 
     let pendingRead: PendingRead =
         { ReadIndex = 1L
-          ReplyChannel = Unchecked.defaultof<_>
+          Reply = ignore
           Responses = Set.ofList [ 1 ] }
 
     let remaining, resolved = NodeRead.classifyPendingReads [ pendingRead ] state
@@ -115,7 +115,7 @@ let ``NodeRead.classifyPendingReads redirects all reads on follower`` () =
 
     let pendingRead: PendingRead =
         { ReadIndex = 1L
-          ReplyChannel = Unchecked.defaultof<_>
+          Reply = ignore
           Responses = Set.ofList [ 1 ] }
 
     let remaining, resolved = NodeRead.classifyPendingReads [ pendingRead ] state

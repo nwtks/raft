@@ -58,28 +58,29 @@ type RaftNode
     do agent.Start()
 
     member _.SubmitCommand cmd =
-        agent.PostAndReply(fun ch -> ClientCommand(cmd, None, None, ch))
+        agent.PostAndReply(fun ch -> ClientCommand(cmd, None, None, ch.Reply))
 
     member _.SubmitCommandWithSession(cmd, clientId, seqNum) =
-        agent.PostAndReply(fun ch -> ClientCommand(cmd, Some clientId, Some seqNum, ch))
+        agent.PostAndReply(fun ch -> ClientCommand(cmd, Some clientId, Some seqNum, ch.Reply))
 
     member _.LinearizableRead() =
-        agent.PostAndReply(fun ch -> LinearizableRead ch)
+        agent.PostAndReply(fun ch -> LinearizableRead ch.Reply)
 
     member _.PostLinearizableRead(continuation: ReadCommandResult -> unit) =
-        let asyncOp = agent.PostAndAsyncReply(fun ch -> LinearizableRead ch)
+        let asyncOp = agent.PostAndAsyncReply(fun ch -> LinearizableRead ch.Reply)
         Async.StartWithContinuations(asyncOp, continuation, ignore, ignore)
 
     member _.SubmitTakeSnapshot data =
-        agent.PostAndReply(fun ch -> TakeSnapshot(data, ch))
+        agent.PostAndReply(fun ch -> TakeSnapshot(data, ch.Reply))
 
     member _.AddPeer peerInfo =
-        agent.PostAndReply(fun ch -> AddPeer(peerInfo, ch))
+        agent.PostAndReply(fun ch -> AddPeer(peerInfo, ch.Reply))
 
     member _.RemovePeer peerId =
-        agent.PostAndReply(fun ch -> RemovePeer(peerId, ch))
+        agent.PostAndReply(fun ch -> RemovePeer(peerId, ch.Reply))
 
-    member _.GetState() = agent.PostAndReply GetState
+    member _.GetState() =
+        agent.PostAndReply(fun ch -> GetState ch.Reply)
 
     member _.TriggerElectionTimeout() = agent.Post ElectionTimeout
 
@@ -88,7 +89,7 @@ type RaftNode
     interface System.IDisposable with
         member _.Dispose() =
             try
-                agent.PostAndReply(fun ch -> Shutdown ch)
+                agent.PostAndReply(fun ch -> Shutdown ch.Reply)
             finally
                 cts.Dispose()
                 (agent :> System.IDisposable).Dispose()

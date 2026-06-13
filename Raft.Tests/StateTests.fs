@@ -89,6 +89,36 @@ let ``State.recoverConfigPhase uses latest config change when multiple entries e
     Assert.Equal(6, updatedConfig.Peers.[0].Id)
 
 [<Fact>]
+let ``State.recoverConfigPhase returns SinglePhase when config command is unparsable`` () =
+    let badCmd = ConfigChange.ConfigCommandPrefix + ":::unparsable"
+
+    let log =
+        logFromList
+            [ { Index = 1L
+                Term = 1L
+                Command = badCmd
+                ClientId = None
+                SeqNum = None } ]
+
+    let phase, updatedConfig = State.recoverConfigPhase log dummyConfig 1L
+    Assert.Equal(SinglePhase, phase)
+    Assert.Equal(dummyConfig.Peers.Length, updatedConfig.Peers.Length)
+
+[<Fact>]
+let ``State.recoverConfigPhase returns SinglePhase when log entry not found at lastConfigIndex`` () =
+    let log =
+        logFromList
+            [ { Index = 1L
+                Term = 1L
+                Command = "x"
+                ClientId = None
+                SeqNum = None } ]
+
+    let phase, updatedConfig = State.recoverConfigPhase log dummyConfig 5L
+    Assert.Equal(SinglePhase, phase)
+    Assert.Equal(dummyConfig.Peers.Length, updatedConfig.Peers.Length)
+
+[<Fact>]
 let ``State.init without persisted state returns term 0 and follower role`` () =
     let state = State.init dummyConfigStandalone None
 
@@ -330,6 +360,19 @@ let ``State.takeSnapshot at last index trims all entries`` () =
     Assert.Equal(1, snapped.Persistent.Log.Count)
     Assert.Equal(Log.NoOpCommand, snapped.Persistent.Log.[2L].Command)
     Assert.False(snapped.Persistent.Log.ContainsKey 1L)
+
+[<Fact>]
+let ``State.takeSnapshot preserves LastConfigIndex when it exceeds snapshot index`` () =
+    let state = State.init dummyConfig None
+
+    let stateWithHighConfigIndex =
+        { state with
+            Persistent =
+                { state.Persistent with
+                    LastConfigIndex = 5L } }
+
+    let result = State.takeSnapshot 3L 1L "data" stateWithHighConfigIndex
+    Assert.Equal(5L, result.Persistent.LastConfigIndex)
 
 [<Fact>]
 let ``State.updateSessionTable updates session table entry`` () =

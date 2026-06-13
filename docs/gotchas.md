@@ -39,13 +39,13 @@ Every `MessageResult` must explicitly set both `ElectionAction` and `HeartbeatAc
 
 ## `PostAndReply` Deadlock Risk
 
-`MailboxProcessor.PostAndReply` blocks the calling thread until the agent processes the message and calls `Reply`. If called from **within** the agent loop (i.e., from a handler running inside `agentLoop`), it deadlocks — the agent is busy processing the current message and cannot process the new one.
+`MailboxProcessor.PostAndReply` blocks the calling thread until the agent processes the message and calls the reply callback. If called from **within** the agent loop (i.e., from a handler running inside `agentLoop`), it deadlocks — the agent is busy processing the current message and cannot process the new one.
 
 **Why it's problematic**: All `PostAndReply` calls in `Node.fs` (e.g., `SubmitCommand`, `GetState`) are from external threads (the application or test code). Adding a call inside a handler module would hang the node permanently.
 
 **How to avoid**: Never call `PostAndReply` from within a handler. If a handler needs to query state, use the `ctx.State` value already in scope. If a handler needs to send a message to itself, use `ctx.Inbox.Post` (fire-and-forget) instead. For external-facing APIs, always use `PostAndReply` from outside the agent.
 
-**Current implementation**: The `RaftNode` public API methods (`SubmitCommand`, `LinearizableRead`, `AddPeer`, etc.) all use `PostAndReply` from external threads. Handler modules in the Agent Layer (e.g., `NodeLocal.handleLocalMessage`) reply directly via `AsyncReplyChannel.Reply()` without blocking.
+**Current implementation**: `NodeMessage` cases that carry reply callbacks use `('T -> unit)` function types embedded directly in the DU cases (e.g., `ClientCommand of command: string * clientId: string option * seqNum: int64 option * (ClientCommandResult -> unit)`). The `RaftNode` public API methods (`SubmitCommand`, `LinearizableRead`, `AddPeer`, etc.) all use `PostAndReply` (or `PostAndAsyncReply`) from external threads, with the reply channel's `Reply` method passed as the callback. Handler modules in the Agent Layer (e.g., `NodeLocal.handleLocalMessage`) reply by calling the callback function directly without blocking.
 
 ---
 
@@ -122,11 +122,11 @@ When `exitJointConsensus` processes a `FinalChange` that removes the current lea
 
 ## `Task<T>` / `ValueTask<T>` to `Async<T>` Conversion
 
-.NET APIs returning `Task<T>` or `ValueTask<T>` require explicit conversion to F# `Async<T>`. The primary pattern is `|> Async.AwaitTask` for `Task<T>` APIs (e.g., `ReadAsync`) and `.AsTask() |> Async.AwaitTask` for `ValueTask<T>` APIs (e.g., `ConnectAsync`, `WriteAsync`). Some `ValueTask<T>` APIs (`AcceptTcpClientAsync`) are directly awaitable with `Async.AwaitTask` in F# 10.
+.NET APIs returning `Task<T>` or `ValueTask<T>` require explicit conversion to F# `Async<T>` via `Async.AwaitTask`. In F# 10, many `ValueTask<T>` APIs are directly awaitable with `Async.AwaitTask` (e.g., `NetworkStream.ReadAsync`, `NetworkStream.WriteAsync`, `TcpListener.AcceptTcpClientAsync`). A few APIs still require `.AsTask() |> Async.AwaitTask` (e.g., `TcpClient.ConnectAsync` with `CancellationToken`).
 
-**Why it's problematic**: `ValueTask<T>` (returned by newer .NET APIs like `ConnectAsync` with `CancellationToken`) usually must be converted to `Task<T>` via `.AsTask()` before awaiting. Forgetting `.AsTask()` may cause a type error, though F# 10's `Async.AwaitTask` accepts some `ValueTask<T>` overloads directly. Accidentally using the synchronous overload (e.g., `stream.Write` instead of `stream.WriteAsync`) bypasses async I/O.
+**Why it's problematic**: Forgetting `.AsTask()` on APIs that need it causes a type error. Accidentally using the synchronous overload (e.g., `stream.Write` instead of `stream.WriteAsync`) bypasses async I/O.
 
-**How to avoid**: Always use the `Async` suffix methods. When calling .NET APIs, check the return type in your IDE — use `.AsTask() |> Async.AwaitTask` for `ValueTask<T>` when `Async.AwaitTask` alone doesn't compile. Keep the pattern consistent with the existing code in `Transport.fs`.
+**How to avoid**: Always use the `Async` suffix methods. Check the return type — most `ValueTask<T>` methods compile directly with `Async.AwaitTask` in F# 10; if you get a type error, add `.AsTask()`. Keep the pattern consistent with the existing code in `Transport.fs`.
 
 ---
 

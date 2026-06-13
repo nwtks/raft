@@ -75,6 +75,12 @@ let ``NodePromotion.tryFinalizeConfiguration is no-op when last entry is already
     Assert.Same(state, result)
 
 [<Fact>]
+let ``NodePromotion.getReadyPeers returns empty when LeaderState is None`` () =
+    let state = State.init dummyConfig None
+    let ready = NodePromotion.getReadyPeers state
+    Assert.Empty ready
+
+[<Fact>]
 let ``NodePromotion.tryPromoteNonVotingPeers promotes caught-up non-voting peer`` () =
     let config = configWithPeers 1 0
     let state = State.initLeaderState (State.init config None)
@@ -110,3 +116,28 @@ let ``NodePromotion.tryPromoteNonVotingPeers promotes caught-up non-voting peer`
     Assert.False(result.NonVotingPeers |> List.exists (fun p -> p.Id = newPeer.Id))
     Assert.Equal(2, result.Persistent.Log.Count)
     Assert.StartsWith(ConfigChange.ConfigCommandPrefix, (Map.find 2L result.Persistent.Log).Command)
+
+[<Fact>]
+let ``NodePromotion.tryPromoteNonVotingPeers is no-op when no peer is caught up`` () =
+    let config = configWithPeers 1 0
+    let state = State.initLeaderState (State.init config None)
+
+    let ctx =
+        { makeNodeContext state with
+            Config = config }
+
+    let newPeer = { Id = 4; Host = "127.0.0.1"; Port = 0 }
+
+    let stateWithPeer =
+        { state with
+            NonVotingPeers = newPeer :: state.NonVotingPeers
+            LeaderState =
+                state.LeaderState
+                |> Option.map (fun ls ->
+                    { ls with
+                        NextIndex = ls.NextIndex |> Map.add newPeer.Id (Log.lastIndex state.Persistent.Log + 1L)
+                        MatchIndex = ls.MatchIndex |> Map.add newPeer.Id Log.initialLogIndex }) }
+
+    let result = NodePromotion.tryPromoteNonVotingPeers ctx stateWithPeer
+    Assert.Contains(newPeer, result.NonVotingPeers)
+    Assert.Same(stateWithPeer, result)

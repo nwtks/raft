@@ -7,30 +7,34 @@ module NodeRead =
         && Log.termAt state.Volatile.CommitIndex state.Persistent.Log = state.Persistent.CurrentTerm
         && State.hasQuorum pendingRead.Responses state
 
+    let classifyPendingRead
+        state
+        ((remaining, resolved): PendingRead list * (PendingRead * ReadCommandResult) list)
+        (pendingRead: PendingRead)
+        =
+        if state.Role = Leader then
+            if
+                canServePendingRead state pendingRead
+                && state.Volatile.LastApplied >= pendingRead.ReadIndex
+            then
+                remaining, (pendingRead, ReadReady) :: resolved
+            else
+                pendingRead :: remaining, resolved
+        else
+            let leaderInfo =
+                state.CurrentLeader
+                |> Option.bind (fun leaderId -> state.Config.Peers |> List.tryFind (fun p -> p.Id = leaderId))
+
+            remaining, (pendingRead, ReadRedirect leaderInfo) :: resolved
+
     let classifyPendingReads pendingReads state =
         pendingReads
-        |> List.fold
-            (fun (remaining, resolved) pendingRead ->
-                if state.Role = Leader then
-                    if
-                        canServePendingRead state pendingRead
-                        && state.Volatile.LastApplied >= pendingRead.ReadIndex
-                    then
-                        remaining, (pendingRead, ReadReady) :: resolved
-                    else
-                        pendingRead :: remaining, resolved
-                else
-                    let leaderInfo =
-                        state.CurrentLeader
-                        |> Option.bind (fun leaderId -> state.Config.Peers |> List.tryFind (fun p -> p.Id = leaderId))
-
-                    remaining, (pendingRead, ReadRedirect leaderInfo) :: resolved)
-            ([], [])
+        |> List.fold (classifyPendingRead state) ([], [])
         |> fun (remaining, resolved) -> List.rev remaining, List.rev resolved
 
     let processPendingReads pendingReads state =
         let remaining, resolved = classifyPendingReads pendingReads state
-        resolved |> List.iter (fun (pr, result) -> pr.ReplyChannel.Reply result)
+        resolved |> List.iter (fun (pr, result) -> pr.Reply result)
         remaining
 
     let handleLinearizableRead ctx (pendingReads: PendingRead list) =

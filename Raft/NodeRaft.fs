@@ -7,47 +7,51 @@ module NodeRaft =
         | None -> NodeUtil.log $"Warning: Unknown peer {peerId} — cannot send response"
 
     let handleRaftMessage ctx =
-        let reply (state, response) peerId wrapper =
+        let reply peerId wrapper (state, response) =
             NodeUtil.saveIfChanged ctx state
             sendResponse ctx peerId (wrapper response)
-            state, true
+            state, true, None
 
         let noReply state =
             NodeUtil.saveIfChanged ctx state
-            state, false
+            state, false, None
 
         function
-        | RequestVoteMsg msg -> reply (Election.handleRequestVote msg ctx.State) msg.CandidateId RequestVoteResponseMsg
+        | RequestVoteMsg msg ->
+            Election.handleRequestVote msg ctx.State
+            |> reply msg.CandidateId RequestVoteResponseMsg
         | RequestVoteResponseMsg msg -> noReply (Election.handleVoteResponse msg.VoterId msg ctx.State)
         | AppendEntriesMsg msg ->
-            reply (Replication.handleAppendEntries msg ctx.State) msg.LeaderId AppendEntriesResponseMsg
+            Replication.handleAppendEntries msg ctx.State
+            |> reply msg.LeaderId AppendEntriesResponseMsg
         | AppendEntriesResponseMsg msg ->
-            noReply (
-                Replication.handleAppendEntriesResponse msg ctx.State
-                |> Replication.advanceCommitIndex
-                |> NodePromotion.tryPromoteNonVotingPeers ctx
-            )
+            Replication.handleAppendEntriesResponse msg ctx.State
+            |> Replication.advanceCommitIndex
+            |> NodePromotion.tryPromoteNonVotingPeers ctx
+            |> noReply
         | InstallSnapshotMsg snap ->
             let state, response = Replication.handleInstallSnapshot snap ctx.State
             NodeUtil.saveIfChanged ctx state
-
-            if response.Success then
-                async {
-                    try
-                        ctx.OnInstallSnapshot snap.Data
-                    with ex ->
-                        NodeUtil.log
-                            $"CRITICAL: Snapshot apply failed at index {snap.LastIncludedIndex}: {ex.Message}. Node may require restart."
-                }
-                |> Async.Start
-
             sendResponse ctx snap.LeaderId (InstallSnapshotResponseMsg response)
-            state, true
+
+            let afterEffect =
+                if response.Success then
+                    async {
+                        try
+                            ctx.OnInstallSnapshot snap.Data
+                        with ex ->
+                            NodeUtil.log
+                                $"CRITICAL: Snapshot apply failed at index {snap.LastIncludedIndex}: {ex.Message}. Node may require restart."
+                    }
+                    |> Some
+                else
+                    None
+
+            state, true, afterEffect
         | InstallSnapshotResponseMsg msg ->
-            noReply (
-                Replication.handleInstallSnapshotResponse msg ctx.State
-                |> Replication.advanceCommitIndex
-            )
+            Replication.handleInstallSnapshotResponse msg ctx.State
+            |> Replication.advanceCommitIndex
+            |> noReply
 
     let updatePendingReads ctx state rpcMsg =
         let updatedReads =
@@ -65,7 +69,8 @@ module NodeRaft =
 
     let handleRaftRPC ctx rpcMsg =
         let oldRole = ctx.State.Role
-        let state, sendReply = handleRaftMessage ctx rpcMsg
+        let state, sendReply, afterEffect = handleRaftMessage ctx rpcMsg
+        afterEffect |> Option.iter Async.Start
 
         let newState =
             NodeApply.applyCommitted ctx.OnApply state

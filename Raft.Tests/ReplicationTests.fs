@@ -791,6 +791,49 @@ let ``Replication.handleInstallSnapshotResponse ignores failed response from fol
     Assert.Equal(state, newState)
 
 [<Fact>]
+let ``Replication.handleInstallSnapshotResponse ignores response when not leader and term is not higher`` () =
+    let state = State.updateTerm 2L (State.init dummyConfig None)
+    Assert.True state.LeaderState.IsNone
+    Assert.Equal(2L, state.Persistent.CurrentTerm)
+
+    let resp: InstallSnapshotResponse =
+        { FollowerTerm = 2L
+          FollowerId = 3
+          Success = false
+          LastIncludedIndex = 5L }
+
+    let newState = Replication.handleInstallSnapshotResponse resp state
+    Assert.Same(state, newState)
+
+[<Fact>]
+let ``Replication.canCommitIndex returns true when quorum is reached and term matches`` () =
+    let leaderState: LeaderState =
+        { NextIndex = Map.ofList [ (2, 2L); (3, 2L) ]
+          MatchIndex = Map.ofList [ (2, 1L); (3, 1L) ] }
+
+    let log = logFromList [ createEntry 1L 1L "x" ]
+
+    let state: RaftState =
+        { Role = Leader
+          Persistent =
+            { CurrentTerm = 1L
+              VotedFor = None
+              Log = log
+              Snapshot = None
+              SessionTable = Map.empty
+              LastConfigIndex = 0L }
+          Volatile = { CommitIndex = 0L; LastApplied = 0L }
+          LeaderState = Some leaderState
+          VotesReceived = Set.empty
+          CurrentLeader = Some 1
+          Config = dummyConfig
+          ConfigPhase = SinglePhase
+          NonVotingPeers = [] }
+
+    let result = Replication.canCommitIndex state leaderState 1L
+    Assert.True result
+
+[<Fact>]
 let ``Replication.advanceCommitIndex advances commit index when majority of peers have matched`` () =
     let leaderState =
         { NextIndex = Map.ofList [ 2, 2L; 3, 1L ]

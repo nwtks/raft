@@ -10,7 +10,7 @@ type ReadCommandResult =
 
 type PendingRead =
     { ReadIndex: LogIndex
-      ReplyChannel: AsyncReplyChannel<ReadCommandResult>
+      Reply: ReadCommandResult -> unit
       Responses: Set<NodeId> }
 
 type TimerAction =
@@ -28,17 +28,13 @@ type NodeMessage =
     | RaftRPC of RaftMessage
     | ElectionTimeout
     | HeartbeatTimeout
-    | GetState of AsyncReplyChannel<RaftState>
-    | ClientCommand of
-        command: string *
-        clientId: string option *
-        seqNum: int64 option *
-        AsyncReplyChannel<ClientCommandResult>
-    | LinearizableRead of AsyncReplyChannel<ReadCommandResult>
-    | TakeSnapshot of data: string * AsyncReplyChannel<unit>
-    | AddPeer of PeerInfo * AsyncReplyChannel<bool>
-    | RemovePeer of NodeId * AsyncReplyChannel<bool>
-    | Shutdown of AsyncReplyChannel<unit>
+    | GetState of (RaftState -> unit)
+    | ClientCommand of command: string * clientId: string option * seqNum: int64 option * (ClientCommandResult -> unit)
+    | LinearizableRead of (ReadCommandResult -> unit)
+    | TakeSnapshot of data: string * (unit -> unit)
+    | AddPeer of PeerInfo * (bool -> unit)
+    | RemovePeer of NodeId * (bool -> unit)
+    | Shutdown of (unit -> unit)
 
 type ITransport =
     abstract member StartListener:

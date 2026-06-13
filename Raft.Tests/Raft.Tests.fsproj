@@ -24,8 +24,10 @@
     <Compile Include="NodeLocalTests.fs" />
     <Compile Include="NodeTimerTests.fs" />
     <Compile Include="NodeTimeoutTests.fs" />
+    <Compile Include="NodeRaftTests.fs" />
     <Compile Include="NodeAgentTests.fs" />
     <Compile Include="NodeTests.fs" />
+    <Compile Include="NodeUtilTests.fs" />
     <Compile Include="TransportTests.fs" />
     <Compile Include="PersistenceTests.fs" />
   </ItemGroup>

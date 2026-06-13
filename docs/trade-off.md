@@ -93,3 +93,18 @@ The codebase uses Coverlet's `complexity` attribute (emitted in `coverage.cobert
 - ❌ Coverlet's complexity is IL branch-count-based, which can differ from source-level McCabe CC for F# constructs (closures, computation expressions).
 - ❌ F# closures compiled as nested classes produce `Invoke` methods whose names don't directly map to the source function name (e.g., `NodeRaft/handleRaftMessage@19`).
 - ❌ `dotnet test` exit code may not reflect the complexity check error in all SDK versions — CI scripts should use the explicit command `dotnet fsi scripts/check-complexity.fsx` for reliable enforcement.
+
+---
+
+## NodeMessage Reply Types: `('T -> unit)` Functions vs `AsyncReplyChannel<'T>`
+
+`NodeMessage` DU cases that carry reply callbacks use `('T -> unit)` function types (e.g., `ClientCommand of command: string * clientId: string option * seqNum: int64 option * (ClientCommandResult -> unit)`) rather than F#'s built-in `AsyncReplyChannel<'T>`.
+
+**Rationale**: `AsyncReplyChannel<'T>` ties the message DU to the `MailboxProcessor` abstraction and forces each case to be generic in its reply type. Plain function types keep the DU simple (all cases are non-generic), make the type easier to inspect in debuggers, and allow reply callbacks to be any function — not just the channel's `Reply` method.
+
+**Trade-offs**:
+- ✅ `NodeMessage` DU has no generic type parameters — simpler, easier to pattern-match
+- ✅ Tests can provide plain `ignore` or assertion lambdas as reply callbacks without constructing reply channels
+- ✅ Reply callbacks are explicit in the DU case definition — you can see at a glance which messages expect a reply
+- ❌ `PostAndReply` callers must manually wire `ch.Reply` as the callback (e.g., `agent.PostAndReply(fun ch -> ClientCommand(cmd, None, None, ch.Reply))`), which is slightly more verbose than the `agent.PostAndReply(fun ch -> ClientCommand(cmd))` that `AsyncReplyChannel<'T>` would allow
+- ❌ No compile-time distinction between reply callbacks and other function parameters — a `(bool -> unit)` could be either a reply or a mutation callback

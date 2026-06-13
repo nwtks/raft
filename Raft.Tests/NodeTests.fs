@@ -39,123 +39,6 @@ let ``RaftNode constructor throws IOException on StartListener failure`` () =
         new RaftNode(dummyConfig, transport, MockPersistence(), ignore) |> ignore)
 
 [<Fact>]
-let ``RaftNode.SubmitCommand accepts submitted commands and applies them to state machine`` () =
-    task {
-        let applied = ResizeArray<LogEntry>()
-        let node, _, _ = makeNodeWithApply (configForNode 1 0) (fun e -> applied.Add e)
-
-        node.TriggerElectionTimeout()
-        Assert.Equal(Accepted, node.SubmitCommand "put x 10")
-
-        let finalState = node.GetState()
-        Assert.Equal(2, finalState.Persistent.Log.Count)
-        Assert.Equal("put x 10", (Map.find 2L finalState.Persistent.Log).Command)
-    }
-
-[<Fact>]
-let ``RaftNode.SubmitCommandWithSession accepts command with clientId and seqNum`` () =
-    task {
-        let node, transport, _ = makeNode (configWithPeers 1 0)
-        let _ = becomeLeader node transport
-
-        let state = node.GetState()
-        Assert.Equal(Leader, state.Role)
-
-        let result = node.SubmitCommandWithSession("put x 42", "client-1", 1L)
-        Assert.Equal(Accepted, result)
-
-        let finalState = node.GetState()
-        Assert.Equal(2, finalState.Persistent.Log.Count)
-        let entry = Map.find 2L finalState.Persistent.Log
-        Assert.Equal(Some "client-1", entry.ClientId)
-        Assert.Equal(Some 1L, entry.SeqNum)
-    }
-
-[<Fact>]
-let ``RaftNode.SubmitCommandWithSession returns Accepted for duplicate session command`` () =
-    task {
-        let node, transport, _ = makeNode (configWithPeers 1 0)
-        let term = becomeLeader node transport
-        Assert.Equal(Leader, (node.GetState()).Role)
-
-        let result1 = node.SubmitCommandWithSession("put x 42", "client-1", 1L)
-        Assert.Equal(Accepted, result1)
-
-        transport.ReceiveMessage(
-            AppendEntriesResponseMsg
-                { FollowerTerm = term
-                  Success = true
-                  MatchIndex = 2L
-                  FollowerId = 2
-                  ConflictTerm = 0L
-                  ConflictIndex = 0L }
-        )
-
-        transport.ReceiveMessage(
-            AppendEntriesResponseMsg
-                { FollowerTerm = term
-                  Success = true
-                  MatchIndex = 2L
-                  FollowerId = 3
-                  ConflictTerm = 0L
-                  ConflictIndex = 0L }
-        )
-
-        node.GetState() |> ignore
-
-        let result2 = node.SubmitCommandWithSession("put x 42", "client-1", 1L)
-        Assert.Equal(Accepted, result2)
-
-        let finalState = node.GetState()
-        Assert.Equal(2, finalState.Persistent.Log.Count)
-    }
-
-[<Fact>]
-let ``RaftNode.SubmitCommandWithSession rejects older seqNum after higher seqNum was processed`` () =
-    task {
-        let node, transport, _ = makeNode (configWithPeers 1 0)
-        let _ = becomeLeader node transport
-        Assert.Equal(Leader, (node.GetState()).Role)
-        Assert.Equal(Accepted, node.SubmitCommandWithSession("cmd", "client-1", 2L))
-
-        transport.ReceiveMessage(
-            AppendEntriesResponseMsg
-                { FollowerTerm = (node.GetState()).Persistent.CurrentTerm
-                  Success = true
-                  MatchIndex = 2L
-                  FollowerId = 2
-                  ConflictTerm = 0L
-                  ConflictIndex = 0L }
-        )
-
-        transport.ReceiveMessage(
-            AppendEntriesResponseMsg
-                { FollowerTerm = (node.GetState()).Persistent.CurrentTerm
-                  Success = true
-                  MatchIndex = 2L
-                  FollowerId = 3
-                  ConflictTerm = 0L
-                  ConflictIndex = 0L }
-        )
-
-        node.GetState() |> ignore
-
-        let result = node.SubmitCommandWithSession("cmd-old", "client-1", 1L)
-        Assert.Equal(Accepted, result)
-
-        let finalState = node.GetState()
-        Assert.Equal(2, finalState.Persistent.Log.Count)
-    }
-
-[<Fact>]
-let ``RaftNode.LinearizableRead returns ReadRedirect for standalone node`` () =
-    task {
-        let node, _, _ = makeNode (configForNode 1 0)
-        let result = node.LinearizableRead()
-        Assert.Equal(ReadRedirect None, result)
-    }
-
-[<Fact>]
 let ``RaftNode queues LinearizableRead until committed entry in current term is applied`` () =
     task {
         let node, transport, _ = makeNode (configWithPeers 1 0)
@@ -295,47 +178,6 @@ let ``RaftNode stepping down resolves pending linearizable reads with redirect``
     }
 
 [<Fact>]
-let ``RaftNode.SubmitTakeSnapshot stores snapshot data in state`` () =
-    task {
-        let node, transport, _ = makeNode (configWithPeers 1 0)
-        let _ = becomeLeader node transport
-
-        node.SubmitTakeSnapshot "snapshot-data"
-
-        let state = node.GetState()
-        Assert.True state.Persistent.Snapshot.IsSome
-        Assert.Equal("snapshot-data", state.Persistent.Snapshot.Value.StateMachineData)
-    }
-
-[<Fact>]
-let ``RaftNode.AddPeer adds non-voting peer when leader`` () =
-    task {
-        let node, transport, _ = makeNode (configWithPeers 1 0)
-        let _ = becomeLeader node transport
-
-        let newPeer = { Id = 4; Host = "127.0.0.1"; Port = 0 }
-        let result = node.AddPeer newPeer
-
-        Assert.True result
-        let state = node.GetState()
-        Assert.Contains(newPeer, state.NonVotingPeers)
-    }
-
-[<Fact>]
-let ``RaftNode.RemovePeer appends config change entry when leader`` () =
-    task {
-        let node, transport, _ = makeNode (configWithPeers 1 0)
-        let term = becomeLeader node transport
-
-        let result = node.RemovePeer 3
-
-        Assert.True result
-        let state = node.GetState()
-        Assert.Equal(2, state.Persistent.Log.Count)
-        Assert.StartsWith(ConfigChange.ConfigCommandPrefix, (Map.find 2L state.Persistent.Log).Command)
-    }
-
-[<Fact>]
 let ``RaftNode handles RequestVote and wins election to become Leader`` () =
     task {
         let node, transport, _ = makeNode (configWithPeers 1 0)
@@ -425,29 +267,7 @@ let ``RaftNode handles RequestVote and wins election to become Leader`` () =
         Assert.Equal(Follower, finalState.Role)
     }
 
-[<Fact>]
-let ``RaftNode ignores RequestVote from unknown candidate`` () =
-    task {
-        let node, transport, _ = makeNode (configWithPeers 1 0)
 
-        let rv =
-            { CandidateTerm = 1L
-              CandidateId = 99
-              LastLogIndex = 0L
-              LastLogTerm = 0L }
-
-        transport.ReceiveMessage(RequestVoteMsg rv)
-        node.GetState() |> ignore
-
-        Assert.DoesNotContain(
-            transport.Messages,
-            fun (p, msg) ->
-                p.Id = 99
-                && match msg with
-                   | RequestVoteResponseMsg _ -> true
-                   | _ -> false
-        )
-    }
 
 [<Fact>]
 let ``RaftNode broadcasts AppendEntries on heartbeat, processes responses, and applies committed entries`` () =
@@ -529,166 +349,17 @@ let ``RaftNode broadcasts AppendEntries on heartbeat, processes responses, and a
         Assert.Equal(Follower, node.GetState().Role)
     }
 
-[<Fact>]
-let ``RaftNode ignores AppendEntries from unknown leader`` () =
-    task {
-        let node, transport, _ = makeNode (configWithPeers 1 0)
 
-        let ae =
-            { LeaderTerm = 1L
-              LeaderId = 99
-              PrevLogIndex = 0L
-              PrevLogTerm = 0L
-              Entries = []
-              LeaderCommit = 0L }
 
-        transport.ReceiveMessage(AppendEntriesMsg ae)
-        node.GetState() |> ignore
 
-        Assert.DoesNotContain(
-            transport.Messages,
-            fun (p, msg) ->
-                p.Id = 99
-                && match msg with
-                   | AppendEntriesResponseMsg _ -> true
-                   | _ -> false
-        )
-    }
 
-[<Fact>]
-let ``RaftNode handles InstallSnapshot from known leader and installs snapshot`` () =
-    task {
-        let node, transport, _ = makeNode (configWithPeers 1 0)
 
-        let snap: InstallSnapshot =
-            { LeaderTerm = 1L
-              LeaderId = 2
-              LastIncludedIndex = 5L
-              LastIncludedTerm = 1L
-              Data = "snapshot-data" }
 
-        transport.ReceiveMessage(InstallSnapshotMsg snap)
-        node.GetState() |> ignore
 
-        let state = node.GetState()
-        Assert.True state.Persistent.Snapshot.IsSome
-        Assert.Equal(5L, state.Persistent.Snapshot.Value.LastIncludedIndex)
-        Assert.Equal("snapshot-data", state.Persistent.Snapshot.Value.StateMachineData)
 
-        Assert.Contains(
-            transport.Messages,
-            fun (p, msg) ->
-                p.Id = 2
-                && match msg with
-                   | InstallSnapshotResponseMsg _ -> true
-                   | _ -> false
-        )
-    }
 
-[<Fact>]
-let ``RaftNode handles InstallSnapshotResponse and updates match index`` () =
-    task {
-        let node, transport, _ = makeNode (configWithPeers 1 0)
-        let term = becomeLeader node transport
 
-        let resp: InstallSnapshotResponse =
-            { FollowerTerm = term
-              FollowerId = 2
-              Success = true
-              LastIncludedIndex = 1L }
 
-        transport.ReceiveMessage(InstallSnapshotResponseMsg resp)
-        node.GetState() |> ignore
-
-        let state = node.GetState()
-        Assert.Equal(Leader, state.Role)
-        Assert.True state.LeaderState.IsSome
-        Assert.Equal(Some 1L, state.LeaderState.Value.MatchIndex.TryFind 2)
-        Assert.Equal(Some 2L, state.LeaderState.Value.NextIndex.TryFind 2)
-    }
-
-[<Fact>]
-let ``RaftNode rejects InstallSnapshot from leader with stale term`` () =
-    task {
-        let node, transport, _ = makeNode (configWithPeers 1 0)
-
-        transport.ReceiveMessage(
-            AppendEntriesMsg
-                { LeaderTerm = 5L
-                  LeaderId = 2
-                  PrevLogIndex = 0L
-                  PrevLogTerm = 0L
-                  Entries = []
-                  LeaderCommit = 0L }
-        )
-
-        node.GetState() |> ignore
-
-        let snap: InstallSnapshot =
-            { LeaderTerm = 3L
-              LeaderId = 2
-              LastIncludedIndex = 10L
-              LastIncludedTerm = 3L
-              Data = "stale-data" }
-
-        transport.ReceiveMessage(InstallSnapshotMsg snap)
-        node.GetState() |> ignore
-
-        let state = node.GetState()
-        Assert.True state.Persistent.Snapshot.IsNone
-
-        Assert.Contains(
-            transport.Messages,
-            fun (p, msg) ->
-                p.Id = 2
-                && match msg with
-                   | InstallSnapshotResponseMsg resp -> not resp.Success
-                   | _ -> false
-        )
-    }
-
-[<Fact>]
-let ``RaftNode ignores InstallSnapshot from unknown leader`` () =
-    task {
-        let node, transport, _ = makeNode (configWithPeers 1 0)
-
-        let snap: InstallSnapshot =
-            { LeaderTerm = 1L
-              LeaderId = 99
-              LastIncludedIndex = 5L
-              LastIncludedTerm = 1L
-              Data = "snapshot-data" }
-
-        transport.ReceiveMessage(InstallSnapshotMsg snap)
-        node.GetState() |> ignore
-
-        Assert.DoesNotContain(
-            transport.Messages,
-            fun (p, msg) ->
-                p.Id = 99
-                && match msg with
-                   | InstallSnapshotResponseMsg _ -> true
-                   | _ -> false
-        )
-    }
-
-[<Fact>]
-let ``RaftNode ignores InstallSnapshotResponse when not leader`` () =
-    task {
-        let node, transport, _ = makeNode (configWithPeers 1 0)
-
-        let resp: InstallSnapshotResponse =
-            { FollowerTerm = 1L
-              FollowerId = 2
-              Success = true
-              LastIncludedIndex = 5L }
-
-        transport.ReceiveMessage(InstallSnapshotResponseMsg resp)
-        node.GetState() |> ignore
-
-        let state = node.GetState()
-        Assert.Equal(Follower, state.Role)
-    }
 
 [<Fact>]
 let ``RaftNode.Dispose does not throw`` () =

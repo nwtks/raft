@@ -110,3 +110,22 @@ let ``FilePersistence.Load returns None for corrupted JSON file`` () =
     finally
         if System.IO.File.Exists fileName then
             System.IO.File.Delete fileName
+
+[<Fact>]
+let ``FilePersistence.Load deletes orphaned .tmp file on startup`` () =
+    let nodeId = getTestNodeId ()
+    let persistence = FilePersistence nodeId :> IPersistence
+    let fileName = sprintf "state_%d.json" nodeId
+    let tempFileName = fileName + ".tmp"
+
+    try
+        System.IO.File.WriteAllText(tempFileName, "orphaned temp content")
+        Assert.True(System.IO.File.Exists tempFileName)
+
+        let result = persistence.Load()
+        Assert.False(System.IO.File.Exists tempFileName, ".tmp file should be deleted during Load")
+        Assert.True result.IsNone
+    finally
+        for f in [ fileName; tempFileName ] do
+            if System.IO.File.Exists f then
+                System.IO.File.Delete f

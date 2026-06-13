@@ -9,27 +9,30 @@ module NodeLocal =
         NodeSnapshot.autoSnapshotIfNeeded ctx appliedState
         |> NodePromotion.tryFinalizeConfiguration
 
+    let appendAsLeader ctx cmd clientId seqNum =
+        let isDuplicate =
+            State.isDuplicateSession ctx.State.Persistent.SessionTable clientId seqNum
+
+        if isDuplicate then
+            ctx.State, Accepted
+        else
+            let state =
+                match clientId, seqNum with
+                | Some cId, Some sNum -> Replication.appendCommandWithSession cmd cId sNum ctx.State
+                | _ -> Replication.appendCommand cmd ctx.State
+
+            commitAndBroadcast ctx state, Accepted
+
+    let redirectResult ctx =
+        ctx.State.CurrentLeader
+        |> Option.bind (fun leaderId -> ctx.Config.Peers |> List.tryFind (fun p -> p.Id = leaderId))
+        |> Redirect
+
     let handleClientCommand ctx cmd clientId seqNum =
         if ctx.State.Role = Leader then
-            let isDuplicate =
-                State.isDuplicateSession ctx.State.Persistent.SessionTable clientId seqNum
-
-            if isDuplicate then
-                ctx.State, Accepted
-            else
-                let state =
-                    match clientId, seqNum with
-                    | Some cId, Some sNum -> Replication.appendCommandWithSession cmd cId sNum ctx.State
-                    | _ -> Replication.appendCommand cmd ctx.State
-
-                commitAndBroadcast ctx state, Accepted
+            appendAsLeader ctx cmd clientId seqNum
         else
-            let result =
-                ctx.State.CurrentLeader
-                |> Option.bind (fun leaderId -> ctx.Config.Peers |> List.tryFind (fun p -> p.Id = leaderId))
-                |> Redirect
-
-            ctx.State, result
+            ctx.State, redirectResult ctx
 
     let isExistingPeer (state: RaftState) peerId =
         state.Config.Peers |> List.exists (fun p -> p.Id = peerId)
@@ -73,17 +76,17 @@ module NodeLocal =
 
     let dispatchLocalMessage ctx =
         function
-        | ClientCommand(cmd, clientId, seqNum, replyChannel) ->
+        | ClientCommand(cmd, clientId, seqNum, reply) ->
             let state, result = handleClientCommand ctx cmd clientId seqNum
-            replyChannel.Reply result
+            reply result
             state
-        | AddPeer(peerInfo, replyChannel) ->
+        | AddPeer(peerInfo, reply) ->
             let state, result = handleAddPeer ctx peerInfo
-            replyChannel.Reply result
+            reply result
             state
-        | RemovePeer(peerId, replyChannel) ->
+        | RemovePeer(peerId, reply) ->
             let state, result = handleRemovePeer ctx peerId
-            replyChannel.Reply result
+            reply result
             state
         | _ ->
             NodeUtil.log $"Warning: unexpected message routed to handleLocalMessage, ignoring"

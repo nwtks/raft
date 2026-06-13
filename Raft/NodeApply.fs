@@ -27,19 +27,21 @@ module NodeApply =
 
         newState
 
+    let applyOneEntry onApply state entry =
+        if entry.Command.StartsWith ConfigChange.ConfigCommandPrefix then
+            applyConfigChangeEntry entry state
+        elif entry.Command = Log.NoOpCommand then
+            state
+        else
+            applyNormalEntry onApply entry state
+
     [<TailCall>]
     let rec loopApplyCommitted onApply state lastApplied =
         if lastApplied < state.Volatile.CommitIndex then
             let next = lastApplied + 1L
 
             match Log.getEntry next state.Persistent.Log with
-            | Some entry when entry.Command.StartsWith ConfigChange.ConfigCommandPrefix ->
-                let newState = applyConfigChangeEntry entry state
-                loopApplyCommitted onApply newState next
-            | Some entry when entry.Command = Log.NoOpCommand -> loopApplyCommitted onApply state next
-            | Some entry ->
-                let newState = applyNormalEntry onApply entry state
-                loopApplyCommitted onApply newState next
+            | Some entry -> loopApplyCommitted onApply (applyOneEntry onApply state entry) next
             | None -> loopApplyCommitted onApply state next
         else
             state, lastApplied

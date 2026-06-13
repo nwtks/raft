@@ -5,6 +5,14 @@ open Raft
 open TestHelpers
 
 [<Fact>]
+let ``NodeBroadcaster.broadcastHeartbeat sends nothing when not leader`` () =
+    let transport = MockTransport()
+    let state = State.init dummyConfig None
+
+    NodeBroadcaster.broadcastHeartbeat dummyConfig transport state
+    Assert.Empty transport.Messages
+
+[<Fact>]
 let ``NodeBroadcaster.sendAppendEntriesOrSnapshot sends InstallSnapshot when follower is behind snapshot`` () =
     let transport = MockTransport()
 
@@ -58,3 +66,14 @@ let ``NodeBroadcaster.sendAppendEntriesOrSnapshot sends InstallSnapshot when fol
                | InstallSnapshotMsg snap -> snap.Data = "snap-data" && snap.LastIncludedIndex = 1L
                | _ -> false
     )
+
+[<Fact>]
+let ``NodeBroadcaster.sendAppendEntriesOrSnapshot does nothing when neither AppendEntries nor InstallSnapshot can be created``
+    ()
+    =
+    let transport = MockTransport()
+    let state = State.init dummyConfig None
+    let peer: PeerInfo = { Id = 2; Host = "127.0.0.1"; Port = 0 }
+
+    NodeBroadcaster.sendAppendEntriesOrSnapshot transport peer state
+    Assert.Empty transport.Messages

@@ -1,18 +1,21 @@
 namespace Raft
 
 module NodePromotion =
+    let isLastEntryFinalChange state =
+        match Log.getEntry (Log.lastIndex state.Persistent.Log) state.Persistent.Log with
+        | Some entry when entry.Command.StartsWith ConfigChange.ConfigCommandPrefix ->
+            match ConfigChange.parse entry.Command with
+            | Some(FinalChange _) -> true
+            | _ -> false
+        | _ -> false
+
     let tryFinalizeConfiguration state =
         match state.ConfigPhase, state.Role with
         | JointPhase(_, newPeers), Leader ->
-            let lastEntry =
-                Log.getEntry (Log.lastIndex state.Persistent.Log) state.Persistent.Log
-
-            match lastEntry with
-            | Some entry when entry.Command.StartsWith ConfigChange.ConfigCommandPrefix ->
-                match ConfigChange.parse entry.Command with
-                | Some(FinalChange _) -> state
-                | _ -> Replication.appendFinalConfiguration newPeers state
-            | _ -> Replication.appendFinalConfiguration newPeers state
+            if isLastEntryFinalChange state then
+                state
+            else
+                Replication.appendFinalConfiguration newPeers state
         | _ -> state
 
     let getReadyPeers state =

@@ -47,12 +47,13 @@ module NodeTimer =
             ctx
 
     let getTimerActionsOnRoleChange ctx oldRole newState sendReply =
-        if oldRole <> Leader && newState.Role = Leader then
+        let wasLeader = oldRole = Leader
+        let isLeader = newState.Role = Leader
+
+        match wasLeader, isLeader with
+        | false, true ->
             NodeBroadcaster.broadcastHeartbeat ctx.Config ctx.Transport newState
             Stop, Reset
-        elif oldRole = Leader && newState.Role <> Leader then
-            Reset, Stop
-        elif sendReply then
-            Reset, Keep
-        else
-            Keep, Keep
+        | true, false -> Reset, Stop
+        | _ when sendReply -> Reset, Keep
+        | _ -> Keep, Keep
