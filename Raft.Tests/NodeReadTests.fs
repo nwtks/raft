@@ -88,10 +88,9 @@ let ``NodeRead.classifyPendingReads resolves read on leader when quorum reached 
           Responses = Set.ofList [ 1; 2; 3 ] }
 
     let remaining, resolved = NodeRead.classifyPendingReads [ pendingRead ] state
-
     Assert.Empty remaining
     Assert.Single resolved |> ignore
-    Assert.Equal(ReadReady, (snd resolved.[0]))
+    Assert.Equal(ReadReady, snd resolved.[0])
 
 [<Fact>]
 let ``NodeRead.classifyPendingReads keeps pending read when quorum not reached`` () =
@@ -105,7 +104,6 @@ let ``NodeRead.classifyPendingReads keeps pending read when quorum not reached``
           Responses = Set.ofList [ 1 ] }
 
     let remaining, resolved = NodeRead.classifyPendingReads [ pendingRead ] state
-
     Assert.Single remaining |> ignore
     Assert.Empty resolved
 
@@ -119,7 +117,6 @@ let ``NodeRead.classifyPendingReads redirects all reads on follower`` () =
           Responses = Set.ofList [ 1 ] }
 
     let remaining, resolved = NodeRead.classifyPendingReads [ pendingRead ] state
-
     Assert.Empty remaining
     Assert.Single resolved |> ignore
 

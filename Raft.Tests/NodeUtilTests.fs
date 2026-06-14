@@ -2,14 +2,13 @@ module Raft.Tests.NodeUtilTests
 
 open Xunit
 open Raft
-open TestHelpers
 
 [<Fact>]
 let ``NodeUtil.sendAsync handles synchronous exception from transport`` () =
     let syncThrowTransport =
         { new ITransport with
             member _.SendMessage _ _ =
-                raise (System.InvalidOperationException("sync failure"))
+                raise (System.InvalidOperationException "sync failure")
 
             member _.StartListener _ _ _ = async { return () } }
 

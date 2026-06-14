@@ -20,6 +20,7 @@ let ``NodePromotion.tryFinalizeConfiguration appends FinalConfiguration when las
 
     let result = NodePromotion.tryFinalizeConfiguration state
     Assert.Equal(3, result.Persistent.Log.Count)
+
     let lastEntry = Log.getEntry 3L result.Persistent.Log
     Assert.True lastEntry.IsSome
     Assert.StartsWith(ConfigChange.ConfigCommandPrefix, lastEntry.Value.Command)
@@ -40,21 +41,10 @@ let ``NodePromotion.tryFinalizeConfiguration appends FinalConfiguration when las
 
     let result = NodePromotion.tryFinalizeConfiguration state
     Assert.Equal(3, result.Persistent.Log.Count)
+
     let lastEntry = Log.getEntry 3L result.Persistent.Log
     Assert.True lastEntry.IsSome
     Assert.StartsWith(ConfigChange.ConfigCommandPrefix, lastEntry.Value.Command)
-
-[<Fact>]
-let ``NodePromotion.tryFinalizeConfiguration is no-op when not in JointPhase`` () =
-    let state = State.init dummyConfig None
-    let result = NodePromotion.tryFinalizeConfiguration state
-    Assert.Same(state, result)
-
-[<Fact>]
-let ``NodePromotion.tryFinalizeConfiguration is no-op when not leader`` () =
-    let state = State.enterJointConsensus [] [] (State.init dummyConfig None)
-    let result = NodePromotion.tryFinalizeConfiguration state
-    Assert.Same(state, result)
 
 [<Fact>]
 let ``NodePromotion.tryFinalizeConfiguration is no-op when last entry is already FinalChange`` () =
@@ -71,6 +61,18 @@ let ``NodePromotion.tryFinalizeConfiguration is no-op when last entry is already
             Role = Leader
             LeaderState = preState.LeaderState }
 
+    let result = NodePromotion.tryFinalizeConfiguration state
+    Assert.Same(state, result)
+
+[<Fact>]
+let ``NodePromotion.tryFinalizeConfiguration is no-op when not in JointPhase`` () =
+    let state = State.init dummyConfig None
+    let result = NodePromotion.tryFinalizeConfiguration state
+    Assert.Same(state, result)
+
+[<Fact>]
+let ``NodePromotion.tryFinalizeConfiguration is no-op when not leader`` () =
+    let state = State.enterJointConsensus [] [] (State.init dummyConfig None)
     let result = NodePromotion.tryFinalizeConfiguration state
     Assert.Same(state, result)
 

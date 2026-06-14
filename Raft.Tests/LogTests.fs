@@ -136,16 +136,15 @@ let ``Log.mergeEntries merges incoming entries over existing log``
         if spec = "" then
             []
         else
-            spec.Split(',')
+            spec.Split ','
             |> Array.map (fun s ->
-                let parts = s.Split(':')
+                let parts = s.Split ':'
                 createEntry (int64 parts.[0]) (int64 parts.[1]) parts.[2])
             |> Array.toList
 
     let log = logFromList (parse logSpec)
     let newEntries = parse newEntriesSpec
     let merged = Log.mergeEntries newEntries log
-
     Assert.Equal(expectedCount, merged.Count)
     Assert.Equal(expectedLastIndex, Log.lastIndex merged)
     Assert.Equal(expectedLastTerm, Log.lastTerm merged)
@@ -160,18 +159,14 @@ let ``Log.trim removes entries at or below lastIncludedIndex and adds sentinel``
               createEntry 4L 2L "d" ]
 
     let trimmed = Log.trim 2L 1L log
-
     Assert.Equal(3, trimmed.Count)
-
     Assert.True(trimmed.ContainsKey 2L)
     Assert.Equal(Log.NoOpCommand, trimmed.[2L].Command)
     Assert.Equal(1L, trimmed.[2L].Term)
-
     Assert.True(trimmed.ContainsKey 3L)
     Assert.Equal("c", trimmed.[3L].Command)
     Assert.True(trimmed.ContainsKey 4L)
     Assert.Equal("d", trimmed.[4L].Command)
-
     Assert.False(trimmed.ContainsKey 1L)
 
 [<Fact>]

@@ -505,57 +505,6 @@ let ``takeSnapshot on leader trims log and installs snapshot on follower`` () =
     Assert.Equal(3L, s1_after_snapResp.LeaderState.Value.NextIndex.[2])
 
 [<Fact>]
-let ``broadcastAppendEntries falls back to InstallSnapshot when follower is behind snapshot`` () =
-    // This simulates the scenario in NodeBroadcaster.broadcastAppendEntries
-    // where createAppendEntries returns None (follower behind snapshot)
-    // and createInstallSnapshot returns Some
-
-    let log =
-        logFromList
-            [ { Index = 5L
-                Term = 2L
-                Command = "d"
-                ClientId = None
-                SeqNum = None } ]
-
-    let ls: LeaderState =
-        { NextIndex = Map.ofList [ 2, 1L ]
-          MatchIndex = Map.ofList [ 2, 0L ] }
-
-    let state =
-        { State.init dummyConfig None with
-            Role = Leader
-            Persistent =
-                { CurrentTerm = 2L
-                  VotedFor = None
-                  Log = log
-                  Snapshot =
-                    Some
-                        { LastIncludedIndex = 3L
-                          LastIncludedTerm = 1L
-                          StateMachineData = "snap" }
-                  SessionTable = Map.empty
-                  LastConfigIndex = 0L }
-            LeaderState = Some ls
-            Volatile = { CommitIndex = 3L; LastApplied = 3L } }
-
-    // createAppendEntries should return None (prevLogIndex=0 < snap.LastIncludedIndex=3)
-    let ae = Replication.createAppendEntries 2 state
-    Assert.True ae.IsNone
-
-    // createInstallSnapshot should return Some (nextIdx=1 <= 3+1)
-    let snap = Replication.createInstallSnapshot 2 state
-    Assert.True snap.IsSome
-    Assert.Equal(3L, snap.Value.LastIncludedIndex)
-    Assert.Equal("snap", snap.Value.Data)
-
-[<Fact>]
-let ``createAppendEntries returns None when leader has no LeaderState`` () =
-    let state = State.init dummyConfig None
-    let ae = Replication.createAppendEntries 2 state
-    Assert.True ae.IsNone
-
-[<Fact>]
 let ``Session-based duplicate detection prevents duplicate command application`` () =
     let c1, c2, c3 = threeNodeConfigs ()
     let mutable s1 = State.init c1 None
@@ -596,7 +545,7 @@ let ``Session-based duplicate detection prevents duplicate command application``
     s1 <- NodeApply.applyCommitted (fun e -> applied.Add e.Command) s1
     // Only cmd1 should be applied once (index 3 is duplicate detected by SessionTable)
     Assert.Equal(3L, s1.Volatile.LastApplied)
-    Assert.Single(applied) |> ignore
+    Assert.Single applied |> ignore
     Assert.Equal("cmd1", applied.[0])
 
 [<Fact>]
@@ -762,5 +711,5 @@ let ``applyCommitted skips noop entries and only applies real commands`` () =
     let applied = ResizeArray<string>()
     s1 <- NodeApply.applyCommitted (fun e -> applied.Add e.Command) s1
     Assert.Equal(2L, s1.Volatile.LastApplied)
-    Assert.Single(applied) |> ignore
+    Assert.Single applied |> ignore
     Assert.Equal("real-cmd", applied.[0])

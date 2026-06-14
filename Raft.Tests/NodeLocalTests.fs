@@ -33,7 +33,6 @@ let ``NodeLocal.commitAndBroadcast persists state, calls apply for committed ent
                     CommitIndex = 1L } }
 
     let result = NodeLocal.commitAndBroadcast ctx stateWithEntry
-
     let loaded = persistence.Load()
     Assert.True loaded.IsSome
     Assert.Equal(stateWithEntry.Persistent.CurrentTerm, loaded.Value.CurrentTerm)

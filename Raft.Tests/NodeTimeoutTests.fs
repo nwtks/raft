@@ -29,6 +29,7 @@ let ``NodeTimeout.handleElectionTimeout is no-op on leader`` () =
 
     let firstResult = NodeTimeout.handleElectionTimeout ctx
     Assert.Equal(Leader, firstResult.State.Role)
+
     let firstTerm = firstResult.State.Persistent.CurrentTerm
     let ctx2 = { ctx with State = firstResult.State }
     let secondResult = NodeTimeout.handleElectionTimeout ctx2

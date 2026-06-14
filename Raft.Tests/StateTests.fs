@@ -42,7 +42,6 @@ let ``State.recoverConfigPhase returns SinglePhase when log contains FinalChange
                 SeqNum = None } ]
 
     let phase, updatedConfig = State.recoverConfigPhase log dummyConfig 1L
-
     Assert.Equal(SinglePhase, phase)
     Assert.Equal(2, updatedConfig.Peers.Length)
     Assert.Equal(4, updatedConfig.Peers.[0].Id)
@@ -51,7 +50,6 @@ let ``State.recoverConfigPhase returns SinglePhase when log contains FinalChange
 let ``State.recoverConfigPhase returns SinglePhase when no config entries in log`` () =
     let log = logFromList []
     let phase, updatedConfig = State.recoverConfigPhase log dummyConfig 0L
-
     Assert.Equal(SinglePhase, phase)
     Assert.Equal(dummyConfig.Peers.Length, updatedConfig.Peers.Length)
 
@@ -83,7 +81,6 @@ let ``State.recoverConfigPhase uses latest config change when multiple entries e
                 SeqNum = None } ]
 
     let phase, updatedConfig = State.recoverConfigPhase log dummyConfig 2L
-
     Assert.Equal(SinglePhase, phase)
     Assert.Equal(1, updatedConfig.Peers.Length)
     Assert.Equal(6, updatedConfig.Peers.[0].Id)
@@ -121,7 +118,6 @@ let ``State.recoverConfigPhase returns SinglePhase when log entry not found at l
 [<Fact>]
 let ``State.init without persisted state returns term 0 and follower role`` () =
     let state = State.init dummyConfigStandalone None
-
     Assert.Equal(Follower, state.Role)
     Assert.Equal(0L, state.Persistent.CurrentTerm)
     Assert.Equal(None, state.Persistent.VotedFor)
@@ -146,7 +142,6 @@ let ``State.init with persisted state restores CurrentTerm, VotedFor, and Log`` 
           LastConfigIndex = 0L }
 
     let state = State.init dummyConfigStandalone (Some loaded)
-
     Assert.Equal(5L, state.Persistent.CurrentTerm)
     Assert.Equal(Some 2, state.Persistent.VotedFor)
     Assert.Equal(1, state.Persistent.Log.Count)
@@ -170,7 +165,6 @@ let ``State.init sets follower role; initLeaderState sets leader role and curren
 let ``State.initLeaderState creates correct NextIndex and MatchIndex for all peers`` () =
     let state = State.init dummyConfig None
     let leaderState = State.initLeaderState state
-
     Assert.Equal(Leader, leaderState.Role)
     Assert.True leaderState.LeaderState.IsSome
     Assert.Equal(1, leaderState.Config.NodeId)
@@ -185,10 +179,9 @@ let ``State.initLeaderState creates correct NextIndex and MatchIndex for all pee
 let ``State.updateTerm resets role to follower when term is higher`` () =
     let state = State.init dummyConfig None
     let leader = State.initLeaderState state
-
     Assert.Equal(Leader, leader.Role)
-    let updated = State.updateTerm 5L leader
 
+    let updated = State.updateTerm 5L leader
     Assert.Equal(Follower, updated.Role)
     Assert.Equal(5L, updated.Persistent.CurrentTerm)
     Assert.Equal(None, updated.Persistent.VotedFor)
@@ -207,7 +200,6 @@ let ``State.updateLogAndCommit updates both log and commit index`` () =
     let newLog = Log.append 1L "test" state.Persistent.Log
 
     let updated = State.updateLogAndCommit newLog 1L state
-
     Assert.Equal(1, updated.Persistent.Log.Count)
     Assert.Equal(1L, updated.Volatile.CommitIndex)
     Assert.Equal(0L, updated.Volatile.LastApplied)
@@ -216,7 +208,6 @@ let ``State.updateLogAndCommit updates both log and commit index`` () =
 let ``State.updateCommitIndex sets CommitIndex without changing LastApplied`` () =
     let state = State.init dummyConfig None
     let updated = State.updateCommitIndex 5L state
-
     Assert.Equal(5L, updated.Volatile.CommitIndex)
     Assert.Equal(0L, updated.Volatile.LastApplied)
 
@@ -224,7 +215,6 @@ let ``State.updateCommitIndex sets CommitIndex without changing LastApplied`` ()
 let ``State.updateLastApplied sets LastApplied without changing CommitIndex`` () =
     let state = State.init dummyConfig None
     let updated = State.updateLastApplied 3L state
-
     Assert.Equal(3L, updated.Volatile.LastApplied)
     Assert.Equal(0L, updated.Volatile.CommitIndex)
 
@@ -232,7 +222,6 @@ let ``State.updateLastApplied sets LastApplied without changing CommitIndex`` ()
 let ``State.followLeader sets follower role and records leader ID`` () =
     let state = State.init dummyConfig None
     let updated = State.followLeader 3L 2 state
-
     Assert.Equal(Follower, updated.Role)
     Assert.Equal(3L, updated.Persistent.CurrentTerm)
     Assert.Equal(Some 2, updated.CurrentLeader)
@@ -316,18 +305,15 @@ let ``State.takeSnapshot trims log and stores snapshot`` () =
                   LastConfigIndex = 0L } }
 
     let snapped = State.takeSnapshot 2L 1L "state-data" state
-
     Assert.Equal(2, snapped.Persistent.Log.Count)
     Assert.True(snapped.Persistent.Log.ContainsKey 2L)
     Assert.True(snapped.Persistent.Log.ContainsKey 3L)
     Assert.Equal(Log.NoOpCommand, snapped.Persistent.Log.[2L].Command)
     Assert.Equal("c", snapped.Persistent.Log.[3L].Command)
-
     Assert.True snapped.Persistent.Snapshot.IsSome
     Assert.Equal(2L, snapped.Persistent.Snapshot.Value.LastIncludedIndex)
     Assert.Equal(1L, snapped.Persistent.Snapshot.Value.LastIncludedTerm)
     Assert.Equal("state-data", snapped.Persistent.Snapshot.Value.StateMachineData)
-
     Assert.Equal(3L, snapped.Volatile.CommitIndex)
     Assert.Equal(3L, snapped.Volatile.LastApplied)
 
@@ -392,11 +378,9 @@ let ``State.updateConfig replaces peers list`` () =
     let state = State.init dummyConfig None
     let newPeers = [ { Id = 5; Host = ""; Port = 0 }; { Id = 6; Host = ""; Port = 0 } ]
     let updated = State.updateConfig newPeers state
-
     Assert.Equal(2, updated.Config.Peers.Length)
     Assert.Equal(5, updated.Config.Peers[0].Id)
     Assert.Equal(6, updated.Config.Peers[1].Id)
-
     Assert.Equal(2, dummyConfig.Peers.Length)
 
 [<Fact>]
@@ -431,7 +415,6 @@ let ``State.exitJointConsensus keeps leader when leader remains in config`` () =
 
     let jointState = State.enterJointConsensus oldPeers newPeers state
     let updated = State.exitJointConsensus newPeers jointState
-
     Assert.Equal(Leader, updated.Role)
     Assert.Equal(SinglePhase, updated.ConfigPhase)
     Assert.Equal(2, updated.Config.Peers.Length)
@@ -474,7 +457,6 @@ let ``State.exitJointConsensus steps down leader when leader is removed from con
         [ { Id = 2; Host = ""; Port = 0 }; { Id = 4; Host = ""; Port = 0 } ]
 
     let updated = State.exitJointConsensus finalPeers jointState
-
     Assert.Equal(Follower, updated.Role)
     Assert.Equal(SinglePhase, updated.ConfigPhase)
     Assert.Equal(2, updated.Config.Peers.Length)
@@ -489,7 +471,6 @@ let ``State.hasQuorumJoint requires majority in both configs`` () =
     let oldPeers = [ { Id = 2; Host = ""; Port = 0 }; { Id = 3; Host = ""; Port = 0 } ]
     let newPeers = [ { Id = 4; Host = ""; Port = 0 }; { Id = 5; Host = ""; Port = 0 } ]
     let nodeId = 1
-
     let allSupporters = set [ 1; 2; 3; 4; 5 ]
     Assert.True(State.hasQuorumJoint allSupporters oldPeers newPeers nodeId)
 

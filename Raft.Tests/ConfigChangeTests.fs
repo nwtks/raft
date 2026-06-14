@@ -23,7 +23,6 @@ let ``ConfigChange.serialize JointChange produces tagged JSON with t=j`` () =
     let oldPeers = [ peer1; peer2 ]
     let newPeers = [ peer1; peer2; peer3 ]
     let json = ConfigChange.serialize (JointChange(oldPeers, newPeers))
-
     Assert.Contains("\"t\":\"j\"", json)
     Assert.Contains("\"o\"", json)
     Assert.Contains("\"n\"", json)
@@ -32,7 +31,6 @@ let ``ConfigChange.serialize JointChange produces tagged JSON with t=j`` () =
 let ``ConfigChange.serialize FinalChange produces tagged JSON with t=f`` () =
     let peers = [ peer1; peer2; peer3 ]
     let json = ConfigChange.serialize (FinalChange peers)
-
     Assert.Contains("\"t\":\"f\"", json)
     Assert.Contains("\"p\"", json)
 

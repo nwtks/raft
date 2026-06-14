@@ -107,7 +107,7 @@ let ``NodeAgent.handleMessage dispatches TakeSnapshot to handleTakeSnapshot`` ()
 
     let mutable replied = false
 
-    let msgResult =
+    let _ =
         NodeAgent.handleMessage ctx (TakeSnapshot("snapshot-data", fun () -> replied <- true))
 
     Assert.True replied

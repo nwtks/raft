@@ -120,6 +120,7 @@ let ``NodeApply.applyNormalEntry updates session table with new session info`` (
 
     let result = NodeApply.applyNormalEntry (fun e -> applied.Add e.Command) entry state
     Assert.Single applied |> ignore
+
     let sessionSeq = result.Persistent.SessionTable |> Map.tryFind "client-1"
     Assert.Equal(Some 3L, sessionSeq)
 
@@ -136,6 +137,7 @@ let ``NodeApply.applyNormalEntry skips callback and keeps state on duplicate ses
 
     let result = NodeApply.applyNormalEntry (fun e -> applied.Add e.Command) entry state
     Assert.Empty applied
+
     let sessionSeq = result.Persistent.SessionTable |> Map.tryFind "client-1"
     Assert.Equal(Some 10L, sessionSeq)
     Assert.Same(state, result)
@@ -149,6 +151,7 @@ let ``NodeApply.applyNormalEntry without ClientId/SeqNum does not touch session 
     let result = NodeApply.applyNormalEntry (fun e -> applied.Add e.Command) entry state
     Assert.Single applied |> ignore
     Assert.Equal("cmd1", applied.[0])
+
     let sessionSeq = result.Persistent.SessionTable |> Map.tryFind "client-1"
     Assert.Equal(Some 10L, sessionSeq)
 

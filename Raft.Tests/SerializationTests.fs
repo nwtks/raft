@@ -199,7 +199,7 @@ let ``InstallSnapshotResponseMsg round-trips through JSON`` () =
 let ``OptionConverter.Read returns None for JSON null token`` () =
     let converter = OptionConverter<int>()
     let jsonBytes = System.Text.Encoding.UTF8.GetBytes "null"
-    let mutable reader = System.Text.Json.Utf8JsonReader(jsonBytes)
+    let mutable reader = System.Text.Json.Utf8JsonReader jsonBytes
     reader.Read() |> ignore
     let result: int option = converter.Read(&reader, typeof<int option>, jsonOptions)
     Assert.Equal(None, result)
@@ -242,3 +242,34 @@ let ``Deserializing invalid case name throws JsonException`` () =
             |> ignore)
 
     Assert.Contains("Unknown message case", ex.Message)
+
+[<Fact>]
+let ``OptionConverterFactory.CanConvert returns false for non-option generic type`` () =
+    let factory = OptionConverterFactory()
+    Assert.False(factory.CanConvert typeof<System.Collections.Generic.List<int>>)
+
+[<Fact>]
+let ``AppendEntriesMsg with Some ClientId and SeqNum round-trips`` () =
+    let original =
+        AppendEntriesMsg
+            { LeaderTerm = 1L
+              LeaderId = 2
+              PrevLogIndex = 0L
+              PrevLogTerm = 0L
+              Entries =
+                [ { Index = 1L
+                    Term = 1L
+                    Command = "set x 1"
+                    ClientId = Some "client-1"
+                    SeqNum = Some 42L } ]
+              LeaderCommit = 1L }
+
+    let deserialized = roundTrip original
+
+    match deserialized with
+    | AppendEntriesMsg ae ->
+        Assert.Equal(1L, ae.LeaderTerm)
+        Assert.Single ae.Entries |> ignore
+        Assert.Equal(Some "client-1", ae.Entries[0].ClientId)
+        Assert.Equal(Some 42L, ae.Entries[0].SeqNum)
+    | _ -> Assert.Fail "Wrong message type"

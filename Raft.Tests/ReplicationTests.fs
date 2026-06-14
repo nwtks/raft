@@ -28,9 +28,9 @@ let ``Replication.calculateConflictInfo returns expected conflict info on mismat
         if logSpec = "" then
             Map.empty
         else
-            logSpec.Split(',')
+            logSpec.Split ','
             |> Array.map (fun s ->
-                let parts = s.Split(':')
+                let parts = s.Split ':'
                 createEntry (int64 parts.[0]) (int64 parts.[1]) "x")
             |> Array.toList
             |> logFromList
@@ -250,36 +250,6 @@ let ``Replication.handleAppendEntriesResponse with success updates match and nex
     let newState = Replication.handleAppendEntriesResponse resp state
     Assert.Equal(4L, newState.LeaderState.Value.MatchIndex.[2])
     Assert.Equal(5L, newState.LeaderState.Value.NextIndex.[2])
-
-[<Fact>]
-let ``Replication.handleAppendEntriesResponse updates term when response contains higher term`` () =
-    let state = State.init dummyConfig None
-
-    let resp =
-        { FollowerTerm = 2L
-          Success = false
-          MatchIndex = 0L
-          FollowerId = 2
-          ConflictTerm = 0L
-          ConflictIndex = 0L }
-
-    let newState = Replication.handleAppendEntriesResponse resp state
-    Assert.Equal(2L, newState.Persistent.CurrentTerm)
-
-[<Fact>]
-let ``Replication.handleAppendEntriesResponse ignores response when not leader`` () =
-    let state = State.init dummyConfig None
-
-    let resp =
-        { FollowerTerm = 0L
-          Success = true
-          MatchIndex = 1L
-          FollowerId = 2
-          ConflictTerm = 0L
-          ConflictIndex = 0L }
-
-    let newState = Replication.handleAppendEntriesResponse resp state
-    Assert.Equal(state, newState)
 
 [<Fact>]
 let ``Replication.handleAppendEntriesResponse decrements NextIndex on failure to resolve log inconsistency`` () =
@@ -524,6 +494,36 @@ let ``Replication.handleAppendEntriesResponse ignores stale response with lower 
     Assert.Equal(state, newState)
 
 [<Fact>]
+let ``Replication.handleAppendEntriesResponse updates term when response contains higher term`` () =
+    let state = State.init dummyConfig None
+
+    let resp =
+        { FollowerTerm = 2L
+          Success = false
+          MatchIndex = 0L
+          FollowerId = 2
+          ConflictTerm = 0L
+          ConflictIndex = 0L }
+
+    let newState = Replication.handleAppendEntriesResponse resp state
+    Assert.Equal(2L, newState.Persistent.CurrentTerm)
+
+[<Fact>]
+let ``Replication.handleAppendEntriesResponse ignores response when not leader`` () =
+    let state = State.init dummyConfig None
+
+    let resp =
+        { FollowerTerm = 0L
+          Success = true
+          MatchIndex = 1L
+          FollowerId = 2
+          ConflictTerm = 0L
+          ConflictIndex = 0L }
+
+    let newState = Replication.handleAppendEntriesResponse resp state
+    Assert.Equal(state, newState)
+
+[<Fact>]
 let ``Replication.createInstallSnapshot returns Some when snapshot exists and follower needs it`` () =
     let log =
         logFromList
@@ -678,22 +678,18 @@ let ``Replication.handleInstallSnapshot installs snapshot and trims log`` () =
           Data = "snap-data" }
 
     let newState, resp = Replication.handleInstallSnapshot snap state
-
     Assert.True resp.Success
     Assert.Equal(2L, resp.LastIncludedIndex)
     Assert.Equal(2L, newState.Persistent.CurrentTerm)
     Assert.Equal(Some 3, newState.CurrentLeader)
-
     Assert.Equal(2, newState.Persistent.Log.Count)
     Assert.True(newState.Persistent.Log.ContainsKey 2L)
     Assert.True(newState.Persistent.Log.ContainsKey 3L)
     Assert.Equal(Log.NoOpCommand, newState.Persistent.Log.[2L].Command)
     Assert.Equal("c", newState.Persistent.Log.[3L].Command)
-
     Assert.True newState.Persistent.Snapshot.IsSome
     Assert.Equal(2L, newState.Persistent.Snapshot.Value.LastIncludedIndex)
     Assert.Equal("snap-data", newState.Persistent.Snapshot.Value.StateMachineData)
-
     Assert.Equal(2L, newState.Volatile.CommitIndex)
     Assert.Equal(2L, newState.Volatile.LastApplied)
 
@@ -746,7 +742,6 @@ let ``Replication.handleInstallSnapshotResponse updates match and next index on 
           LastIncludedIndex = 10L }
 
     let newState = Replication.handleInstallSnapshotResponse resp state
-
     Assert.Equal(10L, newState.LeaderState.Value.MatchIndex.[2])
     Assert.Equal(11L, newState.LeaderState.Value.NextIndex.[2])
 
@@ -884,8 +879,8 @@ let ``Replication.appendFinalConfiguration appends final config entry when leade
     let state = State.initLeaderState (State.init dummyConfig None)
     let newPeers = [ { Id = 4; Host = ""; Port = 0 } ]
     let newState = Replication.appendFinalConfiguration newPeers state
-
     Assert.Equal(2, newState.Persistent.Log.Count)
+
     let entry = Map.find 2L newState.Persistent.Log
     Assert.StartsWith(ConfigChange.ConfigCommandPrefix, entry.Command)
     Assert.True(entry.Command.Contains("f"))
@@ -900,7 +895,6 @@ let ``Replication.appendFinalConfiguration is no-op when not leader`` () =
 let ``Replication.appendCommand appends entry when leader`` () =
     let state = State.initLeaderState (State.init dummyConfig None)
     let newState = Replication.appendCommand "put x 42" state
-
     Assert.Equal(2, newState.Persistent.Log.Count)
     Assert.Equal(2L, (Map.find 2L newState.Persistent.Log).Index)
     Assert.Equal(0L, (Map.find 2L newState.Persistent.Log).Term)
@@ -916,8 +910,8 @@ let ``Replication.appendCommand discards command when not leader`` () =
 let ``Replication.appendCommandWithSession appends with session info when leader`` () =
     let state = State.initLeaderState (State.init dummyConfig None)
     let newState = Replication.appendCommandWithSession "put x 1" "client-1" 42L state
-
     Assert.Equal(2, newState.Persistent.Log.Count)
+
     let entry = Map.find 2L newState.Persistent.Log
     Assert.Equal("put x 1", entry.Command)
     Assert.Equal(Some "client-1", entry.ClientId)
@@ -927,8 +921,8 @@ let ``Replication.appendCommandWithSession appends with session info when leader
 let ``Replication.appendCommandWithSession without session info appends regular entry`` () =
     let state = State.initLeaderState (State.init dummyConfig None)
     let newState = Replication.appendCommandWithSession "cmd" "" 0L state
-
     Assert.Equal(2, newState.Persistent.Log.Count)
+
     let entry = Map.find 2L newState.Persistent.Log
     Assert.Equal("cmd", entry.Command)
     Assert.Equal(Some "", entry.ClientId)

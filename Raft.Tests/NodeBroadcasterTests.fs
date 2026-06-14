@@ -8,7 +8,6 @@ open TestHelpers
 let ``NodeBroadcaster.broadcastHeartbeat sends nothing when not leader`` () =
     let transport = MockTransport()
     let state = State.init dummyConfig None
-
     NodeBroadcaster.broadcastHeartbeat dummyConfig transport state
     Assert.Empty transport.Messages
 
@@ -74,6 +73,5 @@ let ``NodeBroadcaster.sendAppendEntriesOrSnapshot does nothing when neither Appe
     let transport = MockTransport()
     let state = State.init dummyConfig None
     let peer: PeerInfo = { Id = 2; Host = "127.0.0.1"; Port = 0 }
-
     NodeBroadcaster.sendAppendEntriesOrSnapshot transport peer state
     Assert.Empty transport.Messages

@@ -40,6 +40,8 @@ let ``Election.startElection increments term from non-zero term`` () =
 [<InlineData(1L, -1, 2L, 2, 1L, 0L, true, false, 2L, -1)>] // candidate log behind → reject
 [<InlineData(1L, 3, 1L, 2, 0L, 0L, false, false, 1L, 3)>] // voted different candidate → reject
 [<InlineData(3L, -1, 3L, 2, 0L, 0L, false, true, 3L, 2)>] // equal term, not voted → grant
+[<InlineData(1L, -1, 2L, 2, 1L, 2L, true, true, 2L, 2)>] // candidate log term higher → grant (exercises > short-circuit)
+[<InlineData(1L, -1, 1L, 2, 0L, 1L, true, false, 1L, -1)>] // candidate same term but behind → reject (exercises >= false)
 let ``Election.handleRequestVote grants vote to candidate with up-to-date log``
     (
         currentTerm: int64,
@@ -104,19 +106,6 @@ let ``Election.handleVoteResponse promotes node to leader upon receiving majorit
     Assert.Equal(Some 1, newState.CurrentLeader)
 
 [<Fact>]
-let ``Election.handleVoteResponse updates current term when response carries a higher term`` () =
-    let state = Election.startElection (State.init dummyConfig None)
-
-    let resp =
-        { VoterId = 2
-          VoterTerm = 2L
-          VoteGranted = false }
-
-    let newState = Election.handleVoteResponse 2 resp state
-    Assert.Equal(2L, newState.Persistent.CurrentTerm)
-    Assert.Equal(None, newState.Persistent.VotedFor)
-
-[<Fact>]
 let ``Election.handleVoteResponse records vote but stays candidate without majority`` () =
     let config5Nodes =
         { dummyConfig with
@@ -138,7 +127,20 @@ let ``Election.handleVoteResponse records vote but stays candidate without major
     Assert.Equal(2, newState.VotesReceived.Count)
     Assert.True(newState.VotesReceived.Contains 1)
     Assert.True(newState.VotesReceived.Contains 2)
-    Assert.True(newState.LeaderState.IsNone)
+    Assert.True newState.LeaderState.IsNone
+
+[<Fact>]
+let ``Election.handleVoteResponse updates current term when response carries a higher term`` () =
+    let state = Election.startElection (State.init dummyConfig None)
+
+    let resp =
+        { VoterId = 2
+          VoterTerm = 2L
+          VoteGranted = false }
+
+    let newState = Election.handleVoteResponse 2 resp state
+    Assert.Equal(2L, newState.Persistent.CurrentTerm)
+    Assert.Equal(None, newState.Persistent.VotedFor)
 
 [<Fact>]
 let ``Election.handleVoteResponse ignores denied vote when staying candidate without majority`` () =
