@@ -8,7 +8,8 @@ module NodeUtil =
             try
                 transport.SendMessage peer msg
             with ex ->
-                async { return raise ex }
+                log $"Failed to send to {peer.Id}: {ex.Message}"
+                async { () }
 
         async {
             try

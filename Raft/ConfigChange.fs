@@ -44,16 +44,19 @@ module ConfigChange =
         | false, _ -> None
 
     let parse (command: string) =
-        let json = command.Substring ConfigCommandPrefix.Length
-
-        try
-            use doc = System.Text.Json.JsonDocument.Parse json
-            let root = doc.RootElement
-
-            match root.ValueKind with
-            | System.Text.Json.JsonValueKind.Array -> parseArray json
-            | System.Text.Json.JsonValueKind.Object -> parseTagged root
-            | _ -> None
-        with :? System.Text.Json.JsonException as ex ->
-            log $"ConfigChange.parse error: {ex.Message}"
+        if command.Length <= ConfigCommandPrefix.Length then
             None
+        else
+            let json = command.Substring ConfigCommandPrefix.Length
+
+            try
+                use doc = System.Text.Json.JsonDocument.Parse json
+                let root = doc.RootElement
+
+                match root.ValueKind with
+                | System.Text.Json.JsonValueKind.Array -> parseArray json
+                | System.Text.Json.JsonValueKind.Object -> parseTagged root
+                | _ -> None
+            with :? System.Text.Json.JsonException as ex ->
+                log $"ConfigChange.parse error: {ex.Message}"
+                None

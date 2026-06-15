@@ -172,9 +172,9 @@ The codebase uses `printfn` directly rather than a structured logging library (`
 
 ## 12. Config Change Legacy Format Support
 
-`ConfigChange.parse` supports two serialization formats: tagged objects (`{"t":"j"/"f", "o":[...], "n":[...]}`) and plain arrays (`[...]`). The apply path in `NodeApply.applyConfigChangeEntry` also handles the fallback where `parse` returns `None` by deserializing the payload as `PeerInfo list` directly.
+`ConfigChange.parse` supports two serialization formats: tagged objects (`{"t":"j"/"f", "o":[...], "n":[...]}`) and plain arrays (`[...]`). The apply path in `NodeApply.applyConfigChangeEntry` also handles the fallback where `parse` returns `None` by deserializing the payload as `PeerInfo list` directly. A guard clause at the top of `parse` rejects commands shorter than `ConfigCommandPrefix` to prevent `ArgumentOutOfRangeException` from malformed input.
 
-**Rationale**: The plain-array format was the original; tagged objects were added for joint consensus. The fallback in the apply path handles deserialization errors or unparseable payloads as single-phase config changes.
+**Rationale**: The plain-array format was the original; tagged objects were added for joint consensus. The fallback in the apply path handles deserialization errors or unparseable payloads as single-phase config changes. The length guard ensures `ConfigChange.parse` is self-robust regardless of caller-side validation.
 
 **Trade-offs**:
 - ✅ Backward compatibility with log entries written before tagged format

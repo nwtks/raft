@@ -29,7 +29,7 @@ Every `MessageResult` must explicitly set both `ElectionAction` and `HeartbeatAc
 
 ## `Async.Start` Fire-and-Forget Error Handling
 
-`NodeUtil.sendAsync` uses `Async.Start` for fire-and-forget execution. Synchronous exceptions thrown by `transport.SendMessage` are wrapped into a failed `Async<unit>` via `async { return raise ex }`, then caught by the inner `async { try...with }` block and logged. The `onInstallSnapshot` callback also uses `Async.Start` with error handling.
+`NodeUtil.sendAsync` uses `Async.Start` for fire-and-forget execution. Synchronous exceptions thrown by `transport.SendMessage` are immediately caught, logged, and replaced with `async { () }` (no-op). Asynchronous exceptions inside the `async` block are caught by `try...with` and logged. The `onInstallSnapshot` callback also uses `Async.Start` with error handling.
 
 **Why it's problematic**: A failure to send a message to a peer (e.g., connection refused, timeout) is logged but the caller receives no notification of failure. The Raft protocol is designed to tolerate lost messages (retries via heartbeat), but silent failures can mask network partition issues during debugging.
 
@@ -156,4 +156,4 @@ When `exitJointConsensus` processes a `FinalChange` that removes the current lea
 
 **Why it's problematic**: Structural equality on `Map<LogIndex, LogEntry>` is O(n) in the size of the map. On every message that returns a new `RaftState`, `saveIfChanged` compares the entire log, snapshot, and session table structurally. Most of the time, `PersistentState` is unchanged (only volatile state changed), making this an unnecessary O(n) comparison.
 
-**How to avoid**: This is accepted as a trade-off for simplicity. If performance becomes an issue, add a `dirty` flag to `MessageResult` or introduce a version counter. For now, the comparison is cheap for typical log sizes in testing.
+**How to avoid**: This is accepted as a trade-off for simplicity. For now, the comparison is cheap for typical log sizes in testing.

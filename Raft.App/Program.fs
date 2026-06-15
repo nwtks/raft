@@ -91,6 +91,19 @@ let rec inputLoop node kvs kvsLock =
             printfn "Unknown command."
             inputLoop node kvs kvsLock
 
+let waitForPort port (timeoutMs: int) =
+    System.Threading.SpinWait.SpinUntil(
+        (fun () ->
+            try
+                use client = new System.Net.Sockets.TcpClient()
+                client.Connect("127.0.0.1", port)
+                true
+            with _ ->
+                false),
+        timeoutMs
+    )
+    |> ignore
+
 let runNode nodeId =
     let kvsLock = obj ()
     let mutable kvs = Map.empty<string, string>
@@ -120,7 +133,7 @@ let runNode nodeId =
     use node =
         new RaftNode(config, transport, persistence, onApply, onInstallSnapshot, onGetSnapshotData)
 
-    System.Threading.Thread.Sleep 2000
+    waitForPort config.Port 5000
     printCommands ()
     inputLoop node kvs kvsLock
 

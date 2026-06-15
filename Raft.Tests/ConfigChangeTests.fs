@@ -121,12 +121,6 @@ let ``ConfigChange.parse reads FinalChange from full command string`` () =
     | _ -> Assert.Fail "Expected FinalChange"
 
 [<Fact>]
-let ``ConfigChange.parse returns None for invalid JSON`` () =
-    let command = ConfigChange.ConfigCommandPrefix + "{invalid}"
-    let result = ConfigChange.parse command
-    Assert.True result.IsNone
-
-[<Fact>]
 let ``ConfigChange.parse round-trips JointChange`` () =
     let original = JointChange([ peer1; peer2 ], [ peer1; peer2; peer3 ])
     let serialized = ConfigChange.serialize original
@@ -149,3 +143,26 @@ let ``ConfigChange.parse round-trips FinalChange`` () =
     match deserialized with
     | Some(FinalChange peers) -> Assert.Equal(3, peers.Length)
     | _ -> Assert.Fail "Expected FinalChange"
+
+[<Fact>]
+let ``ConfigChange.parse returns None for invalid JSON`` () =
+    let command = ConfigChange.ConfigCommandPrefix + "{invalid}"
+    let result = ConfigChange.parse command
+    Assert.True result.IsNone
+
+[<Fact>]
+let ``ConfigChange.parse returns None when command is shorter than prefix`` () =
+    let command = "__raft_config"
+    let result = ConfigChange.parse command
+    Assert.True result.IsNone
+
+[<Fact>]
+let ``ConfigChange.parse returns None when command equals prefix length (empty JSON)`` () =
+    let command = ConfigChange.ConfigCommandPrefix
+    let result = ConfigChange.parse command
+    Assert.True result.IsNone
+
+[<Fact>]
+let ``ConfigChange.parse returns None for empty string`` () =
+    let result = ConfigChange.parse ""
+    Assert.True result.IsNone
