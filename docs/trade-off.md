@@ -94,21 +94,23 @@ All handlers (except `Shutdown`) return `MessageResult` (`{ State; ElectionActio
 
 ---
 
-## 7. Cyclomatic Complexity via Coverlet
+## 7. Cyclomatic Complexity: Hybrid Approach (Coverlet + Source Analysis)
 
-Cyclomatic complexity is enforced via Coverlet's IL branch-count metric (from `coverage.cobertura.xml`) rather than a Roslyn-based source analyzer.
+Cyclomatic complexity is enforced via a hybrid approach: Coverlet's coverage XML (`coverage.cobertura.xml`) provides method/function discovery and line mapping, while a standalone F# script (`scripts/check-complexity.fsx`) calculates complexity from source code using keyword-based analysis.
 
-**Rationale**: `Microsoft.CodeAnalysis.Metrics` does not support F#. Coverlet, already in the build pipeline for coverage, computes branch counts from compiled IL that correlate closely with McCabe's complexity.
+**Rationale**: `Microsoft.CodeAnalysis.Metrics` does not support F#. Pure IL-level metrics from Coverlet are available but don't always match source-level McCabe complexity for F# constructs like computation expressions and closures. A source-level approach gives more predictable results for an F# codebase. The Coverlet XML is reused for method discovery to avoid re-parsing all source files independently.
 
 **Trade-offs**:
-- ✅ No new dependencies — Coverlet is already a project dependency
-- ✅ F# compatible — operates on IL, not source
+- ✅ No new dependencies — Coverlet is already a project dependency; the script uses only `System.Text.RegularExpressions` and `System.Xml.Linq`
+- ✅ Complexity matches source code structure, not IL compiler artifacts
 - ✅ Single `dotnet test` run produces both coverage and complexity data
-- ✅ MSBuild integration via `CheckComplexityAfterCoverage` target
-- ❌ IL branch counts can differ from source-level McCabe for F# constructs (closures, computation expressions)
-- ❌ `async { }` and `task { }` computation expressions compile to state machine classes with implicit branching (success/failure/cancellation paths), inflating complexity beyond what the source code suggests — this is the primary reason `Transport.fs` and test files using `task { }` have higher Coverlet complexity
-- ❌ F# closures compile to nested classes whose `Invoke` method names don't map directly to source function names (e.g., `NodeRaft/handleRaftMessage@19`)
-- ❌ `dotnet test` exit code may not reflect the complexity check in all SDK versions; CI should use `dotnet fsi scripts/check-complexity.fsx`
+- ✅ MSBuild integration via `CheckComplexityAfterCoverage` target (in `Directory.Build.targets`) which runs the script after `GenerateCoverageResultAfterTest`
+- ✅ Configurable thresholds via `Directory.Build.props` (`ComplexityThreshold`, `ComplexityWarnThreshold`)
+- ❌ Regex-based keyword counting is heuristic — may under- or over-count in edge cases (e.g., `if` inside quoted expressions)
+- ❌ Match-case counting (`|` patterns) uses indentation heuristics rather than AST-walking, potentially missing nested match expressions
+- ❌ Boolean operator counting (`&&`/`||`) is limited to lines containing `if`/`elif`/`while`/`when`, which can miss compound conditions in other contexts
+- ❌ The script must stay synchronized with actual F# syntax features; new constructs require updating the keyword patterns
+- ❌ `dotnet test` exit code may not reflect the complexity check in all SDK versions; CI should use `dotnet fsi scripts/check-complexity.fsx` directly
 
 ---
 

@@ -56,7 +56,7 @@ The middle layer is built on F#'s `MailboxProcessor` (actor model). Each module 
 
 | Module | Responsibility |
 |---|---|
-| `NodeAgent.fs` | The tail-recursive `agentLoop` — the central dispatcher. `Shutdown` is handled directly in `agentLoop` (disposes timers, cancels CTS, replies). All other messages route through `handleMessage`, which dispatches to handler modules (returning `MessageResult`) or handles `GetState`, `LinearizableRead`, and `TakeSnapshot` directly. Results flow through `postProcess` which applies timer actions, Config updates, and PendingRead updates before tail-calling. |
+| `NodeAgent.fs` | The tail-recursive `agentLoop` — the central dispatcher. `Shutdown` is handled directly in `agentLoop` (disposes timers, cancels CTS, replies). All other messages route through `handleMessage`, which dispatches to handler modules (`NodeRaft`, `NodeLocal`, `NodeTimeout`) or dedicated handler functions within `NodeAgent` (`handleGetState`, `handleLinearizableRead`, `handleTakeSnapshot`). All handlers return `MessageResult`. Results flow through `postProcess` which applies timer actions, Config updates, and PendingRead updates before tail-calling. |
 | `NodeRaft.fs` | `handleRaftRPC` — routes incoming `RaftMessage` cases to pure functions (`Election.*`, `Replication.*`), calls `saveIfChanged`, then applies committed entries, auto-snapshot, config finalization, timer actions, and pending read updates. |
 | `NodeLocal.fs` | `handleLocalMessage` — dispatches `ClientCommand`, `AddPeer`, `RemovePeer` via `dispatchLocalMessage`. Each branch replies directly to the caller via the function-type callback embedded in the message. On leader: appends entries, broadcasts, applies committed, auto-snapshots, and finalizes configuration. On non-leader: returns `Redirect` with leader info. Also processes pending reads and returns `MessageResult` with timer actions. |
 | `NodeTimeout.fs` | `handleElectionTimeout` — starts election (or promotes single-node cluster to leader). `handleHeartbeatTimeout` — sends heartbeats/append-entries and promotes non-voting peers. |
@@ -96,30 +96,39 @@ sequenceDiagram
     participant agentLoop
     participant NodeLocal
     participant Replication
-    participant State
+    participant NodeUtil
     participant NodeBroadcaster
+    participant NodeApply
     participant Peer
 
     Client->>RaftNode: SubmitCommand(cmd)
-    RaftNode->>agentLoop: ClientCommand(cmd, replyChannel)
+    RaftNode->>agentLoop: ClientCommand(cmd, None, None, reply)
 
     agentLoop->>NodeLocal: handleLocalMessage
 
-    NodeLocal->>Replication: appendCommand(cmd)
-    Replication->>State: updateLog(newEntry)
-    State-->>NodeLocal: newState
+    NodeLocal->>NodeLocal: handleClientCommand (leader?)
+    alt is Leader
+        NodeLocal->>NodeLocal: appendAsLeader
+        NodeLocal->>Replication: appendCommand(cmd)
+        Replication-->>NodeLocal: newState
 
-    NodeLocal->>NodeUtil: saveIfChanged(persistent)
-    NodeLocal->>NodeBroadcaster: broadcastAppendEntries
-    NodeBroadcaster->>Peer: AppendEntries RPC
+        NodeLocal->>NodeUtil: saveIfChanged
+        NodeLocal->>NodeBroadcaster: broadcastAppendEntries
+        NodeBroadcaster->>Peer: AppendEntries RPC
 
-    NodeLocal->>NodeApply: applyCommitted
-    Note over NodeLocal,Client: applyCommitted returns new state
-    NodeLocal->>Client: reply Accepted
+        NodeLocal->>NodeApply: applyCommitted
+        NodeApply-->>NodeLocal: appliedState
+
+        NodeLocal->>NodeLocal: autoSnapshot / tryFinalizeConfig
+        NodeLocal->>Client: reply Accepted
+    else not Leader
+        NodeLocal->>Client: reply Redirect(leaderInfo)
+    end
+
     NodeLocal-->>agentLoop: MessageResult
 
-    agentLoop->>agentLoop: postProcess (timer, reads)
-    agentLoop->>agentLoop: tail-call with new ctx
+    agentLoop->>agentLoop: postProcess (timer actions, config, reads)
+    agentLoop->>agentLoop: tail-call ctx'
 ```
 
 A timeout flow follows a similar pattern — `ElectionTimeout` → `NodeTimeout.handleElectionTimeout` → `Election.startElection` → `NodeBroadcaster.broadcastRequestVote`.
@@ -141,31 +150,31 @@ NodeContext (tail-call argument in agentLoop — logically immutable, replaced e
 ├── PendingReads (PendingRead list) — replaced by postProcess from MessageResult
 └── State (RaftState) ← immutable value, replaced each iteration
     ├── Role (Follower | Candidate | Leader)
-    ├── CurrentLeader (NodeId option)
-    ├── Config (NodeConfig) ← updated when config change entries are applied
-    ├── ConfigPhase (SinglePhase | JointPhase)
-    ├── NonVotingPeers (PeerInfo list)
-    ├── VotesReceived (Set<NodeId>)
-    ├── LeaderState (LeaderState option)
-    │   ├── NextIndex (Map<NodeId, LogIndex>)
-    │   └── MatchIndex (Map<NodeId, LogIndex>)
+    ├── Persistent (PersistentState) ← flushed to disk via saveIfChanged
+    │   ├── CurrentTerm
+    │   ├── VotedFor (NodeId option)
+    │   ├── Log (Map<LogIndex, LogEntry>)
+    │   ├── Snapshot (Snapshot option)
+    │   ├── SessionTable (Map<string, int64>)
+    │   └── LastConfigIndex
     ├── Volatile (VolatileState)
     │   ├── CommitIndex
     │   └── LastApplied
-    └── Persistent (PersistentState) ← flushed to disk via saveIfChanged
-        ├── CurrentTerm
-        ├── VotedFor (NodeId option)
-        ├── Log (Map<LogIndex, LogEntry>)
-        ├── Snapshot (Snapshot option)
-        ├── SessionTable (Map<string, int64>)
-        └── LastConfigIndex
+    ├── LeaderState (LeaderState option)
+    │   ├── NextIndex (Map<NodeId, LogIndex>)
+    │   └── MatchIndex (Map<NodeId, LogIndex>)
+    ├── VotesReceived (Set<NodeId>)
+    ├── CurrentLeader (NodeId option)
+    ├── Config (NodeConfig) ← updated when config change entries are applied
+    ├── ConfigPhase (SinglePhase | JointPhase)
+    └── NonVotingPeers (PeerInfo list)
 ```
 
 ### Persistence Boundary
 
-`PersistentState` is the **only** structure written to disk. Every handler that mutates persistent fields must call `NodeUtil.saveIfChanged` before replying. The `saveIfChanged` helper is idempotent — it compares the old and new `Persistent` fields structurally and skips the write if unchanged.
+`PersistentState` is the **only** structure written to disk. Every handler that mutates persistent fields must call `NodeUtil.saveIfChanged` before replying. The `saveIfChanged` helper is idempotent — it compares the old and new `Persistent` fields using F# structural equality (`<>`) and skips the write if unchanged.
 
-The write is atomic: data is written to a `.tmp` file, flushed, then `File.Move(..., overwrite=true)` renames it over the target. On startup, orphaned `.tmp` files from a crash during a previous write are cleaned up.
+The write is atomic: data is written to a `.tmp` file using `FileStream` with `Flush(true)` (fsync), then `File.Move(..., overwrite=true)` renames it over the target. On startup, orphaned `.tmp` files from crashes during a previous write are cleaned up.
 
 ### Immutable State Transitions
 
@@ -184,8 +193,9 @@ ctx.State  ──►  handler  ──►  newState (RaftState)
                                             │
                                             ▼
                                       postProcess
-                                      (apply timers,
-                                       update ctx)
+                                      (apply timer actions,
+                                       update Config,
+                                       update PendingReads)
                                             │
                                             ▼
                                       agentLoop (tail-call)
@@ -198,6 +208,7 @@ ctx.State  ──►  handler  ──►  newState (RaftState)
 The `agentLoop` in `NodeAgent.fs` dispatches messages as follows:
 
 ```fsharp
+// Simplified: the actual code is an async { } block with return!
 match msg with
 | Shutdown reply    → handleShutdown ctx reply
 | _                 → handleMessage ctx msg |> postProcess ctx |> agentLoop
@@ -206,12 +217,12 @@ match msg with
 `handleMessage` dispatches:
 - `ElectionTimeout` / `HeartbeatTimeout` → `NodeTimeout.handleElectionTimeout` / `handleHeartbeatTimeout`
 - `RaftRPC rpcMsg` → `NodeRaft.handleRaftRPC`
-- `GetState` → inline reply + `MessageResult`
-- `LinearizableRead` → inline: Leader creates `PendingRead` and calls `NodeRead.handleLinearizableRead`; non-Leader replies `ReadRedirect`
-- `TakeSnapshot` → `NodeSnapshot.handleTakeSnapshot`, replies, returns `MessageResult`
+- `GetState` → `handleGetState` (replies inline, returns `MessageResult`)
+- `LinearizableRead` → `handleLinearizableRead` (Leader: creates `PendingRead`, broadcasts heartbeat, calls `NodeRead.handleLinearizableRead`; non-Leader: replies `ReadRedirect`)
+- `TakeSnapshot` → `handleTakeSnapshot` → `NodeSnapshot.handleTakeSnapshot`
 - `ClientCommand` / `AddPeer` / `RemovePeer` → `NodeLocal.handleLocalMessage`
 
-`postProcess` applies timer actions (`TimerAction → Timer.Change/createTimer`), updates `Config` from `result.State.Config` (if changed), and updates `PendingReads`.
+`postProcess` applies timer actions (`TimerAction → Timer.Change`/`createTimer`/`disposeTimer`), updates `Config` from `result.State.Config` (if changed), and updates `PendingReads`.
 
 Only `Shutdown` is handled entirely outside `handleMessage` and `postProcess` — it disposes timers, cancels the `CancellationTokenSource`, replies, and terminates the loop.
 
@@ -228,9 +239,9 @@ Timers are never manipulated directly by handlers. Instead:
 
 1. Handler returns `TimerAction` (`Keep | Reset | Stop`) in `MessageResult.ElectionAction` / `MessageResult.HeartbeatAction`
 2. `postProcess` calls `NodeTimer.applyElectionAction` / `applyHeartbeatAction`
-3. Those functions translate the action into actual `Timer.Change()` or `createTimer` calls
+3. Those functions translate the action into actual `Timer.Change()` or `createTimer`/`disposeTimer` calls via the shared `applyTimerAction` helper
 
-`NodeTimer.getTimerActionsOnRoleChange` computes the correct `(electionAction, heartbeatAction)` pair based on role transitions:
+`NodeTimer.getTimerActionsOnRoleChange` computes the correct `(electionAction, heartbeatAction)` pair based on role transitions and whether a reply was sent:
 
 | Transition | Election Timer | Heartbeat Timer |
 |---|---|---|
@@ -239,15 +250,15 @@ Timers are never manipulated directly by handlers. Instead:
 | Reply sent (no role change) | Reset | Keep |
 | No reply, no role change | Keep | Keep |
 
-On promotion to Leader, `getTimerActionsOnRoleChange` also calls `NodeBroadcaster.broadcastHeartbeat` to immediately announce leadership.
+On promotion to Leader (→ Leader), `getTimerActionsOnRoleChange` also calls `NodeBroadcaster.broadcastHeartbeat` to immediately announce leadership.
 
 ---
 
 ## Transport Wire Format
 
-Messages are serialized as JSON using custom `System.Text.Json` converters (`RaftMessageConverter` in `Serialization.fs`). The union case name is the discriminator (`"Case"` property) with the payload in a `"Fields"` array. Messages are framed with a **4-byte big-endian length prefix** followed by the UTF-8 JSON payload, so there is no hard size limit.
+Messages are serialized as JSON using custom `System.Text.Json` converters (`RaftMessageConverter` and `OptionConverterFactory` in `Serialization.fs`). The tagged union case name is the discriminator (`"Case"` property) with the payload in a `"Fields"` array. Options are serialized as either `null` (for `None`) or the inner value (for `Some`). Messages are framed with a **4-byte big-endian length prefix** followed by the UTF-8 JSON payload, so there is no hard size limit.
 
-TCP connection timeout for outbound messages is **3 000 ms** (hardcoded in `Transport.sendMessage`).
+TCP send timeout for outbound messages is **3 000 ms** (hardcoded `CancellationTokenSource` in `Transport.sendMessage`).
 
 `NodeMessage` cases that carry reply callbacks (`ClientCommand`, `LinearizableRead`, `GetState`, `TakeSnapshot`, `AddPeer`, `RemovePeer`, `Shutdown`) are never sent over the wire — they are only posted locally to the inbox.
 
@@ -309,7 +320,6 @@ graph TD
     NodeRaft --> NodeTimer
     NodeRaft --> NodeRead
     NodeRaft --> NodeUtil
-    NodeRaft --> NodeBroadcaster
 
     NodeLocal --> Replication
     NodeLocal --> NodeBroadcaster
@@ -366,7 +376,7 @@ All state mutations are serialized through the `MailboxProcessor` inbox. Since t
 
 ### Testability via Pure Functions
 
-The Algorithm Layer (`Election`, `Replication`, `State`, `Log`) contains zero I/O. Tests create `RaftState` values, call functions, and assert on the returned state — no mocks, no timers, no network setup. The `IntegrationTests.fs` suite exercises full Raft scenarios (election, replication, split-brain, stale leader rejection) entirely through these pure functions.
+The Algorithm Layer (`Election`, `Replication`, `State`, `Log`, `ConfigChange`) contains zero I/O. Tests create `RaftState` values, call functions, and assert on the returned state — no mocks, no timers, no network setup. The `IntegrationTests.fs` suite exercises full Raft scenarios (leader election, log replication, log inconsistency recovery, split-brain, stale leader rejection, cluster membership changes) entirely through these pure functions.
 
 ### Crash Recovery
 
