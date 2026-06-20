@@ -3,6 +3,13 @@ namespace Raft
 module Transport =
     let log msg = printfn "[Transport] %s" msg
 
+    let createAndStartListener port =
+        let listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Any, port)
+        listener.Start()
+        let boundPort = (listener.LocalEndpoint :?> System.Net.IPEndPoint).Port
+        log $"Listening on port {boundPort}."
+        listener, boundPort
+
     [<TailCall>]
     let rec readAsync
         (stream: System.Net.Sockets.NetworkStream)
@@ -87,13 +94,11 @@ module Transport =
             | ex -> log $"Connection handler error: {ex.Message}."
         }
 
-    let startListener config postMessage (ct: System.Threading.CancellationToken) =
-        let listener =
-            new System.Net.Sockets.TcpListener(System.Net.IPAddress.Any, config.Port)
-
-        listener.Start()
-        log $"Listening on port {config.Port}."
-
+    let runListenerLoop
+        (listener: System.Net.Sockets.TcpListener)
+        postMessage
+        (ct: System.Threading.CancellationToken)
+        =
         async {
             use _reg =
                 ct.Register(fun () ->
@@ -141,8 +146,13 @@ module Transport =
         }
 
 type TcpTransport() =
+    let mutable boundPort = 0
+    member _.BoundPort = boundPort
+
     interface ITransport with
         member _.StartListener config postMessage ct =
-            Transport.startListener config postMessage ct
+            let listener, port = Transport.createAndStartListener config.Port
+            boundPort <- port
+            Transport.runListenerLoop listener postMessage ct
 
         member _.SendMessage peer msg = Transport.sendMessage peer msg

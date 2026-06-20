@@ -13,7 +13,12 @@ module NodeApply =
         | None ->
             let json = entry.Command.Substring ConfigChange.ConfigCommandPrefix.Length
             let newPeers = System.Text.Json.JsonSerializer.Deserialize<PeerInfo list> json
-            State.updateConfig newPeers stateWithIndex
+
+            if isNull (box newPeers) then
+                ConfigChange.log $"Cannot parse config change command at index {entry.Index}, ignoring: {entry.Command}"
+                stateWithIndex
+            else
+                State.updateConfig newPeers stateWithIndex
 
     let applyNormalEntry onApply entry state =
         let isDuplicate =

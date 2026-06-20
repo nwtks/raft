@@ -43,6 +43,12 @@ module NodePromotion =
                 NonVotingPeers = remainingNonVoting }
             |> Replication.appendJointConsensus oldPeers allVoting
 
+    let applyAndCompact ctx state =
+        state
+        |> NodeApply.applyCommitted ctx.OnApply
+        |> NodeSnapshot.autoSnapshotIfNeeded ctx
+        |> tryFinalizeConfiguration
+
     let tryPromoteNonVotingPeers ctx state =
         if state.Role = Leader && not (List.isEmpty state.NonVotingPeers) then
             let newState = promoteReadyNonVotingPeers state
@@ -52,9 +58,6 @@ module NodePromotion =
             else
                 NodeUtil.saveIfChanged ctx newState
                 NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport newState
-
-                NodeApply.applyCommitted ctx.OnApply newState
-                |> NodeSnapshot.autoSnapshotIfNeeded ctx
-                |> tryFinalizeConfiguration
+                applyAndCompact ctx newState
         else
             state

@@ -174,13 +174,13 @@ The codebase uses `printfn` directly rather than a structured logging library (`
 
 ## 12. Config Change Legacy Format Support
 
-`ConfigChange.parse` supports two serialization formats: tagged objects (`{"t":"j"/"f", "o":[...], "n":[...]}`) and plain arrays (`[...]`). The apply path in `NodeApply.applyConfigChangeEntry` also handles the fallback where `parse` returns `None` by deserializing the payload as `PeerInfo list` directly. A guard clause at the top of `parse` rejects commands shorter than `ConfigCommandPrefix` to prevent `ArgumentOutOfRangeException` from malformed input.
+`ConfigChange.parse` supports two serialization formats: tagged objects (`{"t":"j"/"f", "o":[...], "n":[...]}`) and plain arrays (`[...]`). The apply path in `NodeApply.applyConfigChangeEntry` includes a null guard: when `parse` returns `None` and the raw deserialization yields `null`, the entry is logged and skipped rather than crashing.
 
-**Rationale**: The plain-array format was the original; tagged objects were added for joint consensus. The fallback in the apply path handles deserialization errors or unparseable payloads as single-phase config changes. The length guard ensures `ConfigChange.parse` is self-robust regardless of caller-side validation.
+**Rationale**: The plain-array format was the original; tagged objects were added for joint consensus. The null guard prevents a `NullReferenceException` from malformed payloads like `"null"` which `System.Text.Json` deserializes as `null` for a `PeerInfo list` (reference type). The length guard in `ConfigChange.parse` also rejects commands shorter than `ConfigCommandPrefix` to prevent `ArgumentOutOfRangeException`.
 
 **Trade-offs**:
 - ✅ Backward compatibility with log entries written before tagged format
-- ✅ Robust — unparseable config commands are treated as single-phase `updateConfig` rather than crashing
+- ✅ Robust — null payloads are logged and silently skipped; the node's peer configuration remains unchanged
 - ❌ Three code paths for config change parsing (tagged, array, fallback) — more test surface
 - ❌ The apply-path fallback (`System.Text.Json.JsonSerializer.Deserialize<PeerInfo list>`) duplicates the array parsing logic of `parseArray`
 
@@ -188,14 +188,14 @@ The codebase uses `printfn` directly rather than a structured logging library (`
 
 ## 13. Per-RPC-Type Handler Functions vs Single Big `handleRaftMessage`
 
-`NodeRaft.handleRaftMessage` was refactored from one function with 6 match branches (+ `reply`/`noReply` closures) into 6 dedicated handler functions (`handleRequestVote`, `handleRequestVoteResponse`, `handleAppendEntries`, `handleAppendEntriesResponse`, `handleInstallSnapshot`, `handleInstallSnapshotResponse`), with `handleRaftMessage` becoming a thin dispatcher.
+`NodeRaft.handleRaftMessage` was refactored from one function with 6 match branches into 6 dedicated handler functions (`handleRequestVote`, `handleRequestVoteResponse`, `handleAppendEntries`, `handleAppendEntriesResponse`, `handleInstallSnapshot`, `handleInstallSnapshotResponse`), with `handleRaftMessage` becoming a thin dispatcher. Each handler returns `RaftState * bool` (state + whether a reply was sent). Previously the tuple also included an `Async<unit> option` for after-effects, but `handleInstallSnapshot` now starts its `onInstallSnapshot` callback inline via `Async.Start`.
 
-**Rationale**: The original function mixed responsibilities — the `reply` and `noReply` closures captured `ctx` and combined `saveIfChanged` (persistence I/O) with `sendResponse` (network I/O) inline within each branch. Each RPC type has different I/O requirements (e.g., `InstallSnapshotMsg` spawns an async after-effect), making the single-function approach hard to reason about.
+**Rationale**: The original function mixed responsibilities — each branch combined `saveIfChanged` (persistence I/O) with `sendResponse` (network I/O) and `afterEffect` (async spawn) with different patterns across branches. The `afterEffect` tuple element was only used by one handler but forced all handlers to carry it.
 
 **Trade-offs**:
-- ✅ Each handler function is independently responsible for exactly one RPC type
+- ✅ Each handler function is independently responsible for exactly one RPC type and its I/O
 - ✅ No closure captures — each handler explicitly takes `ctx` as a parameter
-- ✅ I/O operations (save, send, async spawn) are visible directly in each handler
+- ✅ The `afterEffect` async spawn is now local to `handleInstallSnapshot` where it belongs, not a cross-cutting tuple element
 - ✅ Adding a new RPC type requires adding one handler function + one match case in the dispatcher
 - ❌ More code overall (6 handlers + dispatcher vs 6 branches in one function)
 - ❌ Slight duplication: most handlers call `saveIfChanged` explicitly, where the old `reply`/`noReply` closures handled it once each
@@ -217,17 +217,17 @@ The codebase uses `printfn` directly rather than a structured logging library (`
 
 ---
 
-## 15. Inlined `commitAndBroadcast` vs Hidden Micro-Orchestrator
+## 15. Replaced `commitAndBroadcast` with Common `applyAndCompact` Pipeline
 
-`NodeLocal.commitAndBroadcast` was removed and its pipeline (save → broadcast → apply → autoSnapshot → finalize) was inlined at its two call sites (`appendAsLeader`, `handleRemovePeer`).
+`NodeLocal.commitAndBroadcast` was removed. Its post-save pipeline (apply committed → auto-snapshot → finalize config) was extracted into `NodePromotion.applyAndCompact`, leaving the per-call-site I/O (save, broadcast) explicit at each call site (`appendAsLeader`, `handleRemovePeer`).
 
-**Rationale**: The original function hid a 5-step pipeline behind a short, generic name. The caller had no visibility into which side effects were being executed without reading the helper.
+**Rationale**: The original function hid a 5-step pipeline behind a short, generic name. The caller had no visibility into which side effects were being executed without reading the helper. By extracting only the pure post-processing chain into a shared helper while keeping save+broadcast visible at the call site, the code balances DRY with explicitness.
 
 **Trade-offs**:
-- ✅ Each call site explicitly shows the full post-commit pipeline
-- ✅ No hidden side effects — readers can see save, broadcast, apply, snapshot, and finalize at the call site
-- ❌ Code duplication (two copies of the same 5-step pipeline)
-- ❌ If the pipeline changes, both call sites must be updated (mitigated: simple pipeline with stable steps)
+- ✅ Each call site explicitly shows the I/O (save, broadcast) before the common post-processing
+- ✅ No hidden side effects — readers can see save and broadcast at the call site
+- ❌ Slight duplication: two call sites each repeat save+broadcast before calling `applyAndCompact`
+- ❌ An extra module-level function (`NodePromotion.applyAndCompact`) to navigate
 
 ---
 

@@ -73,7 +73,7 @@ Test files mirror the source module structure — one test file per source modul
 | Test File | Covers |
 |---|---|
 | `IntegrationTests.fs` | End-to-end Raft scenarios (leader election, log replication, log inconsistency recovery, split-brain, stale leader rejection) — pure function calls, no TCP/actor/timers |
-| `TransportTests.fs` | Real TCP sockets on loopback (the only test file that opens real sockets; may conflict if ports are in use) |
+| `TransportTests.fs` | Real TCP sockets on loopback (uses dynamic port allocation — no hardcoded ports) |
 | `ElectionTests.fs` | `Election.fs` |
 | `ReplicationTests.fs` | `Replication.fs` |
 | `LogTests.fs` | `Log.fs` |
@@ -97,4 +97,4 @@ Test files mirror the source module structure — one test file per source modul
 
 **`IntegrationTests.fs`** exercises end-to-end Raft scenarios by calling the pure `Election`, `Replication`, and `State` module functions directly — **no TCP sockets, no `RaftNode` actor, no real timers**. These tests are fast and deterministic.
 
-**`TransportTests.fs`** is the only test file that opens real TCP sockets on loopback. It may conflict if ports are already in use; run in isolation when needed.
+**`TransportTests.fs`** is the only test file that opens real TCP sockets on loopback. Ports are dynamically allocated (port 0) to avoid conflicts.

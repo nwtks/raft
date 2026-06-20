@@ -15,12 +15,7 @@ module NodeLocal =
 
             NodeUtil.saveIfChanged ctx state
             NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state
-            let appliedState = NodeApply.applyCommitted ctx.OnApply state
-
-            let finalState =
-                NodeSnapshot.autoSnapshotIfNeeded ctx appliedState
-                |> NodePromotion.tryFinalizeConfiguration
-
+            let finalState = NodePromotion.applyAndCompact ctx state
             finalState, Accepted
 
     let redirectResult ctx =
@@ -72,12 +67,7 @@ module NodeLocal =
             let state = Replication.appendJointConsensus oldPeers newPeers ctx.State
             NodeUtil.saveIfChanged ctx state
             NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state
-            let appliedState = NodeApply.applyCommitted ctx.OnApply state
-
-            let finalState =
-                NodeSnapshot.autoSnapshotIfNeeded ctx appliedState
-                |> NodePromotion.tryFinalizeConfiguration
-
+            let finalState = NodePromotion.applyAndCompact ctx state
             finalState, true
         else
             ctx.State, false

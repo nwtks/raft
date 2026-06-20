@@ -83,7 +83,7 @@ let ``NodeApply.applyConfigChangeEntry handles old array format (parseArray fall
     Assert.Equal(2, result.Config.Peers.Head.Id)
 
 [<Fact>]
-let ``NodeApply.applyConfigChangeEntry uses fallback deserialization when parse returns None`` () =
+let ``NodeApply.applyConfigChangeEntry ignores entry when parse returns None and deserialization yields null`` () =
     let state = State.init dummyConfig None
     let cmd = ConfigChange.ConfigCommandPrefix + "null"
 
@@ -96,7 +96,7 @@ let ``NodeApply.applyConfigChangeEntry uses fallback deserialization when parse 
 
     let result = NodeApply.applyConfigChangeEntry entry state
     Assert.Equal(SinglePhase, result.ConfigPhase)
-    Assert.Null result.Config.Peers
+    Assert.Equal<PeerInfo list>(dummyConfig.Peers, result.Config.Peers)
 
 [<Fact>]
 let ``NodeApply.applyNormalEntry applies command and invokes callback when not duplicate`` () =

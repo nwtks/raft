@@ -10,18 +10,18 @@ module NodeRaft =
         let state, response = Election.handleRequestVote msg ctx.State
         NodeUtil.saveIfChanged ctx state
         sendResponse ctx msg.CandidateId (RequestVoteResponseMsg response)
-        state, true, None
+        state, true
 
     let handleRequestVoteResponse ctx msg =
         let state = Election.handleVoteResponse msg.VoterId msg ctx.State
         NodeUtil.saveIfChanged ctx state
-        state, false, None
+        state, false
 
     let handleAppendEntries ctx msg =
         let state, response = Replication.handleAppendEntries msg ctx.State
         NodeUtil.saveIfChanged ctx state
         sendResponse ctx msg.LeaderId (AppendEntriesResponseMsg response)
-        state, true, None
+        state, true
 
     let handleAppendEntriesResponse ctx msg =
         let state =
@@ -30,27 +30,24 @@ module NodeRaft =
             |> NodePromotion.tryPromoteNonVotingPeers ctx
 
         NodeUtil.saveIfChanged ctx state
-        state, false, None
+        state, false
 
     let handleInstallSnapshot ctx snap =
         let state, response = Replication.handleInstallSnapshot snap ctx.State
         NodeUtil.saveIfChanged ctx state
         sendResponse ctx snap.LeaderId (InstallSnapshotResponseMsg response)
 
-        let afterEffect =
-            if response.Success then
-                async {
-                    try
-                        ctx.OnInstallSnapshot snap.Data
-                    with ex ->
-                        NodeUtil.log
-                            $"CRITICAL: Snapshot apply failed at index {snap.LastIncludedIndex}: {ex.Message}. Node may require restart."
-                }
-                |> Some
-            else
-                None
+        if response.Success then
+            async {
+                try
+                    ctx.OnInstallSnapshot snap.Data
+                with ex ->
+                    NodeUtil.log
+                        $"CRITICAL: Snapshot apply failed at index {snap.LastIncludedIndex}: {ex.Message}. Node may require restart."
+            }
+            |> Async.Start
 
-        state, true, afterEffect
+        state, true
 
     let handleInstallSnapshotResponse ctx msg =
         let state =
@@ -58,7 +55,7 @@ module NodeRaft =
             |> Replication.advanceCommitIndex
 
         NodeUtil.saveIfChanged ctx state
-        state, false, None
+        state, false
 
     let handleRaftMessage ctx rpcMsg =
         match rpcMsg with
@@ -85,13 +82,8 @@ module NodeRaft =
 
     let handleRaftRPC ctx rpcMsg =
         let oldRole = ctx.State.Role
-        let state, sendReply, afterEffect = handleRaftMessage ctx rpcMsg
-        afterEffect |> Option.iter Async.Start
-
-        let newState =
-            NodeApply.applyCommitted ctx.OnApply state
-            |> NodeSnapshot.autoSnapshotIfNeeded ctx
-            |> NodePromotion.tryFinalizeConfiguration
+        let state, sendReply = handleRaftMessage ctx rpcMsg
+        let newState = NodePromotion.applyAndCompact ctx state
 
         if oldRole <> Leader && newState.Role = Leader then
             NodeBroadcaster.broadcastHeartbeat ctx.Config ctx.Transport newState

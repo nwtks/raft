@@ -19,14 +19,16 @@ let waitForPort port (timeoutMs: int) =
 
 [<Fact>]
 let ``TcpTransport.SendMessage triggers listener callback with message on loopback`` () =
-    let port = 15001
-    let config = dummyConfigWithPort port
+    let config = dummyConfigWithPort 0
     let cts = new System.Threading.CancellationTokenSource()
     let tcs = System.Threading.Tasks.TaskCompletionSource<RaftMessage>()
     let postMessage msg = tcs.TrySetResult msg |> ignore
-    let tcpTransport = TcpTransport() :> ITransport
-    tcpTransport.StartListener config postMessage cts.Token |> Async.Start
-    waitForPort port 5000
+    let tcpTransport = TcpTransport()
+
+    (tcpTransport :> ITransport).StartListener config postMessage cts.Token
+    |> Async.Start
+
+    waitForPort tcpTransport.BoundPort 5000
 
     let reqVote =
         { CandidateTerm = 1L
@@ -35,7 +37,10 @@ let ``TcpTransport.SendMessage triggers listener callback with message on loopba
           LastLogTerm = 0L }
 
     let msg = RequestVoteMsg reqVote
-    tcpTransport.SendMessage (dummyPeer port) msg |> Async.RunSynchronously
+
+    (tcpTransport :> ITransport).SendMessage (dummyPeer tcpTransport.BoundPort) msg
+    |> Async.RunSynchronously
+
     let received = tcs.Task.Wait(System.TimeSpan.FromSeconds 5.0)
     cts.Cancel()
     Assert.True(received, "Message was not received within timeout")
@@ -68,17 +73,19 @@ let ``TcpTransport.SendMessage handles connection refused without throwing`` () 
 
 [<Fact>]
 let ``TcpTransport listener handles deserialization error without crashing`` () =
-    let port = 15005
-    let config = dummyConfigWithPort port
+    let config = dummyConfigWithPort 0
     let cts = new System.Threading.CancellationTokenSource()
     let tcs = System.Threading.Tasks.TaskCompletionSource<RaftMessage>()
     let postMessage msg = tcs.TrySetResult msg |> ignore
-    let tcpTransport = TcpTransport() :> ITransport
-    tcpTransport.StartListener config postMessage cts.Token |> Async.Start
-    waitForPort port 5000
+    let tcpTransport = TcpTransport()
+
+    (tcpTransport :> ITransport).StartListener config postMessage cts.Token
+    |> Async.Start
+
+    waitForPort tcpTransport.BoundPort 5000
 
     use client = new System.Net.Sockets.TcpClient()
-    client.Connect("127.0.0.1", port)
+    client.Connect("127.0.0.1", tcpTransport.BoundPort)
     use stream = client.GetStream()
     let garbage = System.Text.Encoding.UTF8.GetBytes("not valid json")
     let len = garbage.Length
@@ -95,7 +102,7 @@ let ``TcpTransport listener handles deserialization error without crashing`` () 
           LastLogIndex = 0L
           LastLogTerm = 0L }
 
-    tcpTransport.SendMessage (dummyPeer port) (RequestVoteMsg reqVote)
+    (tcpTransport :> ITransport).SendMessage (dummyPeer tcpTransport.BoundPort) (RequestVoteMsg reqVote)
     |> Async.RunSynchronously
 
     let received = tcs.Task.Wait(System.TimeSpan.FromSeconds 5.0)
@@ -108,16 +115,18 @@ let ``TcpTransport listener handles deserialization error without crashing`` () 
 
 [<Fact>]
 let ``TcpTransport handles zero-length frame and disconnect`` () =
-    let port = 15006
-    let config = dummyConfigWithPort port
+    let config = dummyConfigWithPort 0
     let cts = new System.Threading.CancellationTokenSource()
     let postMessage _ = ()
-    let tcpTransport = TcpTransport() :> ITransport
-    tcpTransport.StartListener config postMessage cts.Token |> Async.Start
-    waitForPort port 5000
+    let tcpTransport = TcpTransport()
+
+    (tcpTransport :> ITransport).StartListener config postMessage cts.Token
+    |> Async.Start
+
+    waitForPort tcpTransport.BoundPort 5000
 
     use client = new System.Net.Sockets.TcpClient()
-    client.Connect("127.0.0.1", port)
+    client.Connect("127.0.0.1", tcpTransport.BoundPort)
     let stream = client.GetStream()
     let lenPrefix = [| 0uy; 0uy; 0uy; 0uy |]
     stream.Write(lenPrefix, 0, 4)
@@ -127,16 +136,18 @@ let ``TcpTransport handles zero-length frame and disconnect`` () =
 
 [<Fact>]
 let ``TcpTransport handles partial message frame`` () =
-    let port = 15007
-    let config = dummyConfigWithPort port
+    let config = dummyConfigWithPort 0
     let cts = new System.Threading.CancellationTokenSource()
     let postMessage _ = ()
-    let tcpTransport = TcpTransport() :> ITransport
-    tcpTransport.StartListener config postMessage cts.Token |> Async.Start
-    waitForPort port 5000
+    let tcpTransport = TcpTransport()
+
+    (tcpTransport :> ITransport).StartListener config postMessage cts.Token
+    |> Async.Start
+
+    waitForPort tcpTransport.BoundPort 5000
 
     use client = new System.Net.Sockets.TcpClient()
-    client.Connect("127.0.0.1", port)
+    client.Connect("127.0.0.1", tcpTransport.BoundPort)
     let stream = client.GetStream()
     let largeLen = 100000
 
