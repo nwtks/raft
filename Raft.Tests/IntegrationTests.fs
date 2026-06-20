@@ -174,7 +174,7 @@ let ``Concurrent candidacy resolves with one leader in 3-node cluster`` () =
     Assert.True resp2_ae.Success
 
 [<Fact>]
-let ``Stale leader AppendEntries is rejected and stale leader steps down to follower`` () =
+let ``Stale leader AppendEntries is rejected and leader steps down`` () =
     let c1, c2, c3 = threeNodeConfigs ()
     let mutable s1 = State.init c1 None
     let mutable s2 = State.init c2 None

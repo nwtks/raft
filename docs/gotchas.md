@@ -142,9 +142,9 @@ When `exitJointConsensus` processes a `FinalChange` that removes the current lea
 
 ## `tryPromoteNonVotingPeers` Side Effects
 
-`NodePromotion.tryPromoteNonVotingPeers` calls `NodeUtil.saveIfChanged`, `NodeBroadcaster.broadcastAppendEntries`, `NodeApply.applyCommitted`, `NodeSnapshot.autoSnapshotIfNeeded`, and `NodePromotion.tryFinalizeConfiguration` inline — all within the handler's synchronous flow.
+`NodePromotion.tryPromoteNonVotingPeers` is an I/O wrapper that calls `promoteReadyNonVotingPeers` (pure state transformation), then `NodeUtil.saveIfChanged`, `NodeBroadcaster.broadcastAppendEntries`, `NodeApply.applyCommitted`, `NodeSnapshot.autoSnapshotIfNeeded`, and `NodePromotion.tryFinalizeConfiguration` — all within the handler's synchronous flow.
 
-**Why it's problematic**: This function has significant side effects beyond simple state transformation. It's called from `NodeRaft.handleRaftMessage` (on `AppendEntriesResponseMsg`) and `NodeTimeout.receiveHeartbeatTimeout`. These side effects happen during message processing, which is correct but can make debugging non-deterministic behavior harder because promotion can cascade into further state changes including config finalization.
+**Why it's problematic**: This function has significant side effects beyond simple state transformation. It's called from `NodeRaft.handleAppendEntriesResponse` and `NodeTimeout.receiveHeartbeatTimeout`. These side effects happen during message processing, which is correct but can make debugging non-deterministic behavior harder because promotion can cascade into further state changes including config finalization.
 
 **How to avoid**: When debugging unexpected state transitions, consider that `tryPromoteNonVotingPeers` may be triggering configuration changes as a side effect of normal log replication responses. `tryFinalizeConfiguration` is also called independently in `handleRaftRPC` and `handleLocalMessage` for non-promotion-triggered config finalization.
 

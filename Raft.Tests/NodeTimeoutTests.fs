@@ -5,6 +5,27 @@ open Raft
 open TestHelpers
 
 [<Fact>]
+let ``NodeTimeout.tryBecomeLeaderInSingleNodeCluster promotes on single-node cluster`` () =
+    let config = { dummyConfig with Peers = [] }
+    let state = Election.startElection (State.init config None)
+
+    let ctx =
+        { makeNodeContext state with
+            Config = config }
+
+    let result = NodeTimeout.tryBecomeLeaderInSingleNodeCluster ctx state
+    Assert.Equal(Leader, result.Role)
+    Assert.True result.LeaderState.IsSome
+
+[<Fact>]
+let ``NodeTimeout.tryBecomeLeaderInSingleNodeCluster is no-op on multi-node cluster`` () =
+    let state = Election.startElection (State.init dummyConfig None)
+    let ctx = makeNodeContext state
+    let result = NodeTimeout.tryBecomeLeaderInSingleNodeCluster ctx state
+    Assert.Equal(Candidate, result.Role)
+    Assert.Same(state, result)
+
+[<Fact>]
 let ``NodeTimeout.handleElectionTimeout promotes follower to leader in single-node cluster`` () =
     let config = { dummyConfig with Peers = [] }
     let state = State.init config None

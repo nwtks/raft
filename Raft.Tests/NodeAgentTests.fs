@@ -5,7 +5,7 @@ open Raft
 open TestHelpers
 
 [<Fact>]
-let ``NodeAgent.postProcess uses result State.Config when it differs from ctx.Config`` () =
+let ``NodeAgent.postProcess uses update State.Config when it differs from ctx.Config`` () =
     let ctx = makeDefaultNodeContext ()
 
     let modifiedState =

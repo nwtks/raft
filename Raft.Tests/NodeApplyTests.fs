@@ -27,7 +27,7 @@ let makeFinalEntry index term =
       SeqNum = None }
 
 [<Fact>]
-let ``NodeApply.applyConfigChangeEntry enters JointPhase on JointChange command without session`` () =
+let ``NodeApply.applyConfigChangeEntry enters JointPhase on JointChange`` () =
     let state = State.init dummyConfig None
     let entry = makeJointEntry 1L 1L
     let result = NodeApply.applyConfigChangeEntry entry state
@@ -56,7 +56,7 @@ let ``NodeApply.applyConfigChangeEntry with session info updates SessionTable be
     | _ -> Assert.Fail "Expected JointPhase" |> ignore
 
 [<Fact>]
-let ``NodeApply.applyConfigChangeEntry exits JointPhase on FinalChange command`` () =
+let ``NodeApply.applyConfigChangeEntry exits JointPhase on FinalChange`` () =
     let mutable state = State.init dummyConfig None
     state <- State.enterJointConsensus c2 c3 state
     let entry = makeFinalEntry 2L 1L
@@ -143,7 +143,7 @@ let ``NodeApply.applyNormalEntry skips callback and keeps state on duplicate ses
     Assert.Same(state, result)
 
 [<Fact>]
-let ``NodeApply.applyNormalEntry without ClientId/SeqNum does not touch session table`` () =
+let ``NodeApply.applyNormalEntry without ClientId/SeqNum skips session table update`` () =
     let applied = ResizeArray<string>()
     let mutable state = State.init dummyConfig None
     state <- State.updateSessionTable "client-1" 10L state

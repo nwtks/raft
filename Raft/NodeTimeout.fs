@@ -10,6 +10,15 @@ module NodeTimeout =
           HeartbeatAction = if isElection then Keep else action
           PendingReads = remainingReads }
 
+    let tryBecomeLeaderInSingleNodeCluster ctx state =
+        if List.isEmpty ctx.Config.Peers && State.hasQuorum state.VotesReceived state then
+            let newState = State.initLeaderState state
+            NodeUtil.saveIfChanged ctx newState
+            NodeBroadcaster.broadcastHeartbeat ctx.Config ctx.Transport newState
+            newState
+        else
+            state
+
     let receiveElectionTimeout ctx =
         if ctx.State.Role = Leader then
             ctx.State, Keep
@@ -17,16 +26,7 @@ module NodeTimeout =
             let state = Election.startElection ctx.State
             NodeUtil.saveIfChanged ctx state
             NodeBroadcaster.broadcastRequestVote ctx.Config ctx.Transport state
-
-            let finalState =
-                if List.isEmpty ctx.Config.Peers && State.hasQuorum state.VotesReceived state then
-                    let newState = State.initLeaderState state
-                    NodeUtil.saveIfChanged ctx newState
-                    NodeBroadcaster.broadcastHeartbeat ctx.Config ctx.Transport newState
-                    newState
-                else
-                    state
-
+            let finalState = tryBecomeLeaderInSingleNodeCluster ctx state
             finalState, Reset
 
     let handleElectionTimeout ctx =

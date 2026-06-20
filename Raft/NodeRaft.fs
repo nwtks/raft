@@ -6,52 +6,68 @@ module NodeRaft =
         | Some peer -> NodeUtil.sendAsync ctx.Transport peer msg
         | None -> NodeUtil.log $"Warning: Unknown peer {peerId} — cannot send response"
 
-    let handleRaftMessage ctx =
-        let reply peerId wrapper (state, response) =
-            NodeUtil.saveIfChanged ctx state
-            sendResponse ctx peerId (wrapper response)
-            state, true, None
+    let handleRequestVote ctx msg =
+        let state, response = Election.handleRequestVote msg ctx.State
+        NodeUtil.saveIfChanged ctx state
+        sendResponse ctx msg.CandidateId (RequestVoteResponseMsg response)
+        state, true, None
 
-        let noReply state =
-            NodeUtil.saveIfChanged ctx state
-            state, false, None
+    let handleRequestVoteResponse ctx msg =
+        let state = Election.handleVoteResponse msg.VoterId msg ctx.State
+        NodeUtil.saveIfChanged ctx state
+        state, false, None
 
-        function
-        | RequestVoteMsg msg ->
-            Election.handleRequestVote msg ctx.State
-            |> reply msg.CandidateId RequestVoteResponseMsg
-        | RequestVoteResponseMsg msg -> noReply (Election.handleVoteResponse msg.VoterId msg ctx.State)
-        | AppendEntriesMsg msg ->
-            Replication.handleAppendEntries msg ctx.State
-            |> reply msg.LeaderId AppendEntriesResponseMsg
-        | AppendEntriesResponseMsg msg ->
+    let handleAppendEntries ctx msg =
+        let state, response = Replication.handleAppendEntries msg ctx.State
+        NodeUtil.saveIfChanged ctx state
+        sendResponse ctx msg.LeaderId (AppendEntriesResponseMsg response)
+        state, true, None
+
+    let handleAppendEntriesResponse ctx msg =
+        let state =
             Replication.handleAppendEntriesResponse msg ctx.State
             |> Replication.advanceCommitIndex
             |> NodePromotion.tryPromoteNonVotingPeers ctx
-            |> noReply
-        | InstallSnapshotMsg snap ->
-            let state, response = Replication.handleInstallSnapshot snap ctx.State
-            NodeUtil.saveIfChanged ctx state
-            sendResponse ctx snap.LeaderId (InstallSnapshotResponseMsg response)
 
-            let afterEffect =
-                if response.Success then
-                    async {
-                        try
-                            ctx.OnInstallSnapshot snap.Data
-                        with ex ->
-                            NodeUtil.log
-                                $"CRITICAL: Snapshot apply failed at index {snap.LastIncludedIndex}: {ex.Message}. Node may require restart."
-                    }
-                    |> Some
-                else
-                    None
+        NodeUtil.saveIfChanged ctx state
+        state, false, None
 
-            state, true, afterEffect
-        | InstallSnapshotResponseMsg msg ->
+    let handleInstallSnapshot ctx snap =
+        let state, response = Replication.handleInstallSnapshot snap ctx.State
+        NodeUtil.saveIfChanged ctx state
+        sendResponse ctx snap.LeaderId (InstallSnapshotResponseMsg response)
+
+        let afterEffect =
+            if response.Success then
+                async {
+                    try
+                        ctx.OnInstallSnapshot snap.Data
+                    with ex ->
+                        NodeUtil.log
+                            $"CRITICAL: Snapshot apply failed at index {snap.LastIncludedIndex}: {ex.Message}. Node may require restart."
+                }
+                |> Some
+            else
+                None
+
+        state, true, afterEffect
+
+    let handleInstallSnapshotResponse ctx msg =
+        let state =
             Replication.handleInstallSnapshotResponse msg ctx.State
             |> Replication.advanceCommitIndex
-            |> noReply
+
+        NodeUtil.saveIfChanged ctx state
+        state, false, None
+
+    let handleRaftMessage ctx rpcMsg =
+        match rpcMsg with
+        | RequestVoteMsg msg -> handleRequestVote ctx msg
+        | RequestVoteResponseMsg msg -> handleRequestVoteResponse ctx msg
+        | AppendEntriesMsg msg -> handleAppendEntries ctx msg
+        | AppendEntriesResponseMsg msg -> handleAppendEntriesResponse ctx msg
+        | InstallSnapshotMsg snap -> handleInstallSnapshot ctx snap
+        | InstallSnapshotResponseMsg msg -> handleInstallSnapshotResponse ctx msg
 
     let updatePendingReads ctx state rpcMsg =
         let updatedReads =
@@ -77,8 +93,11 @@ module NodeRaft =
             |> NodeSnapshot.autoSnapshotIfNeeded ctx
             |> NodePromotion.tryFinalizeConfiguration
 
+        if oldRole <> Leader && newState.Role = Leader then
+            NodeBroadcaster.broadcastHeartbeat ctx.Config ctx.Transport newState
+
         let electionAction, heartbeatAction =
-            NodeTimer.getTimerActionsOnRoleChange ctx oldRole newState sendReply
+            NodeTimer.getTimerActionsOnRoleChange oldRole newState sendReply
 
         let remainingReads = updatePendingReads ctx newState rpcMsg
 

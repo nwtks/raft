@@ -12,7 +12,7 @@ let ``NodeBroadcaster.broadcastHeartbeat sends nothing when not leader`` () =
     Assert.Empty transport.Messages
 
 [<Fact>]
-let ``NodeBroadcaster.sendAppendEntriesOrSnapshot sends InstallSnapshot when follower is behind snapshot`` () =
+let ``NodeBroadcaster.sendAppendEntriesOrSnapshot sends InstallSnapshot when follower is behind`` () =
     let transport = MockTransport()
 
     let state: RaftState =
@@ -67,7 +67,7 @@ let ``NodeBroadcaster.sendAppendEntriesOrSnapshot sends InstallSnapshot when fol
     )
 
 [<Fact>]
-let ``NodeBroadcaster.sendAppendEntriesOrSnapshot does nothing when neither AppendEntries nor InstallSnapshot can be created``
+let ``NodeBroadcaster.sendAppendEntriesOrSnapshot is no-op when neither AppendEntries nor InstallSnapshot can be created``
     ()
     =
     let transport = MockTransport()

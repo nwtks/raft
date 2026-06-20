@@ -48,7 +48,7 @@ let ``Replication.calculateConflictInfo returns expected conflict info on mismat
     Assert.Equal(expectedConflictIndex, conflictIndex)
 
 [<Fact>]
-let ``Replication.handleAppendEntries appends entries and updates commit index on success`` () =
+let ``Replication.handleAppendEntries appends entries and advances commit index`` () =
     let state =
         { State.init dummyConfig None with
             Persistent =
@@ -74,7 +74,7 @@ let ``Replication.handleAppendEntries appends entries and updates commit index o
     Assert.Equal(1L, newState.Volatile.CommitIndex)
 
 [<Fact>]
-let ``Replication.handleAppendEntries rejects request when leader term is lower than follower term`` () =
+let ``Replication.handleAppendEntries rejects when leader term is lower than follower term`` () =
     let state =
         { State.init dummyConfig None with
             Persistent =
@@ -154,7 +154,7 @@ let ``Replication.handleAppendEntries rejects when PrevLogIndex exceeds follower
     Assert.Equal(2L, resp.ConflictIndex)
 
 [<Fact>]
-let ``Replication.handleAppendEntries with PrevLogIndex > log last index returns ConflictIndex = lastIndex + 1`` () =
+let ``Replication.handleAppendEntries with PrevLogIndex > lastIndex returns ConflictIndex = lastIndex + 1`` () =
     let log =
         logFromList
             [ { Index = 1L
@@ -222,7 +222,7 @@ let ``Replication.handleAppendEntries with conflict at log index 1 triggers firs
     Assert.Equal(1L, resp.ConflictIndex)
 
 [<Fact>]
-let ``Replication.handleAppendEntriesResponse with success updates match and next indices`` () =
+let ``Replication.handleAppendEntriesResponse advances match and next indices on success`` () =
     let ls: LeaderState =
         { NextIndex = Map.ofList [ 2, 5L ]
           MatchIndex = Map.ofList [ 2, 0L ] }
@@ -282,7 +282,7 @@ let ``Replication.handleAppendEntriesResponse decrements NextIndex on failure to
     Assert.Equal(1L, updatedNext)
 
 [<Fact>]
-let ``Replication.handleAppendEntriesResponse uses ConflictTerm optimization when leader has entries in that term`` () =
+let ``Replication.handleAppendEntriesResponse uses ConflictTerm optimization when leader has entries`` () =
     let leaderState =
         { NextIndex = Map.ofList [ 2, 4L ]
           MatchIndex = Map.ofList [ 2, 0L ] }
@@ -327,7 +327,7 @@ let ``Replication.handleAppendEntriesResponse uses ConflictTerm optimization whe
     Assert.Equal(3L, newState.LeaderState.Value.NextIndex.[2])
 
 [<Fact>]
-let ``Replication.handleAppendEntriesResponse uses ConflictIndex when leader has no entries in ConflictTerm`` () =
+let ``Replication.handleAppendEntriesResponse uses ConflictIndex when leader lacks ConflictTerm entries`` () =
     let leaderState =
         { NextIndex = Map.ofList [ 2, 4L ]
           MatchIndex = Map.ofList [ 2, 0L ] }
@@ -436,7 +436,7 @@ let ``Replication.handleAppendEntriesResponse with ConflictTerm not found in log
     Assert.Equal(3L, newState.LeaderState.Value.NextIndex.[2])
 
 [<Fact>]
-let ``Replication.handleAppendEntriesResponse with ConflictTerm=0 uses ConflictIndex`` () =
+let ``Replication.handleAppendEntriesResponse with ConflictTerm=0 falls back to ConflictIndex`` () =
     let ls: LeaderState =
         { NextIndex = Map.ofList [ 2, 5L ]
           MatchIndex = Map.ofList [ 2, 0L ] }
@@ -494,7 +494,7 @@ let ``Replication.handleAppendEntriesResponse ignores stale response with lower 
     Assert.Equal(state, newState)
 
 [<Fact>]
-let ``Replication.handleAppendEntriesResponse updates term when response contains higher term`` () =
+let ``Replication.handleAppendEntriesResponse updates term on response with higher term`` () =
     let state = State.init dummyConfig None
 
     let resp =
@@ -604,7 +604,7 @@ let ``Replication.createInstallSnapshot returns None when no snapshot exists`` (
     Assert.Equal("snap", snap.Value.Data)
 
 [<Fact>]
-let ``Replication.createInstallSnapshot returns None when snapshot is behind follower's next index`` () =
+let ``Replication.createInstallSnapshot returns None when snapshot is behind follower's NextIndex`` () =
     let log =
         logFromList
             [ { Index = 5L
@@ -786,7 +786,7 @@ let ``Replication.handleInstallSnapshotResponse ignores failed response from fol
     Assert.Equal(state, newState)
 
 [<Fact>]
-let ``Replication.handleInstallSnapshotResponse ignores response when not leader and term is not higher`` () =
+let ``Replication.handleInstallSnapshotResponse ignores response when not leader (term not higher)`` () =
     let state = State.updateTerm 2L (State.init dummyConfig None)
     Assert.True state.LeaderState.IsNone
     Assert.Equal(2L, state.Persistent.CurrentTerm)
@@ -801,7 +801,7 @@ let ``Replication.handleInstallSnapshotResponse ignores response when not leader
     Assert.Same(state, newState)
 
 [<Fact>]
-let ``Replication.canCommitIndex returns true when quorum is reached and term matches`` () =
+let ``Replication.canCommitIndex returns true with quorum and matching term`` () =
     let leaderState: LeaderState =
         { NextIndex = Map.ofList [ (2, 2L); (3, 2L) ]
           MatchIndex = Map.ofList [ (2, 1L); (3, 1L) ] }
@@ -829,7 +829,7 @@ let ``Replication.canCommitIndex returns true when quorum is reached and term ma
     Assert.True result
 
 [<Fact>]
-let ``Replication.advanceCommitIndex advances commit index when majority of peers have matched`` () =
+let ``Replication.advanceCommitIndex advances when majority of peers match`` () =
     let leaderState =
         { NextIndex = Map.ofList [ 2, 2L; 3, 1L ]
           MatchIndex = Map.ofList [ 2, 1L; 3, 0L ] }
@@ -918,7 +918,7 @@ let ``Replication.appendCommandWithSession appends with session info when leader
     Assert.Equal(Some 42L, entry.SeqNum)
 
 [<Fact>]
-let ``Replication.appendCommandWithSession without session info appends regular entry`` () =
+let ``Replication.appendCommandWithSession falls back to regular entry without session info`` () =
     let state = State.initLeaderState (State.init dummyConfig None)
     let newState = Replication.appendCommandWithSession "cmd" "" 0L state
     Assert.Equal(2, newState.Persistent.Log.Count)

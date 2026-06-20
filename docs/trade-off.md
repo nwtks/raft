@@ -183,3 +183,62 @@ The codebase uses `printfn` directly rather than a structured logging library (`
 - ✅ Robust — unparseable config commands are treated as single-phase `updateConfig` rather than crashing
 - ❌ Three code paths for config change parsing (tagged, array, fallback) — more test surface
 - ❌ The apply-path fallback (`System.Text.Json.JsonSerializer.Deserialize<PeerInfo list>`) duplicates the array parsing logic of `parseArray`
+
+---
+
+## 13. Per-RPC-Type Handler Functions vs Single Big `handleRaftMessage`
+
+`NodeRaft.handleRaftMessage` was refactored from one function with 6 match branches (+ `reply`/`noReply` closures) into 6 dedicated handler functions (`handleRequestVote`, `handleRequestVoteResponse`, `handleAppendEntries`, `handleAppendEntriesResponse`, `handleInstallSnapshot`, `handleInstallSnapshotResponse`), with `handleRaftMessage` becoming a thin dispatcher.
+
+**Rationale**: The original function mixed responsibilities — the `reply` and `noReply` closures captured `ctx` and combined `saveIfChanged` (persistence I/O) with `sendResponse` (network I/O) inline within each branch. Each RPC type has different I/O requirements (e.g., `InstallSnapshotMsg` spawns an async after-effect), making the single-function approach hard to reason about.
+
+**Trade-offs**:
+- ✅ Each handler function is independently responsible for exactly one RPC type
+- ✅ No closure captures — each handler explicitly takes `ctx` as a parameter
+- ✅ I/O operations (save, send, async spawn) are visible directly in each handler
+- ✅ Adding a new RPC type requires adding one handler function + one match case in the dispatcher
+- ❌ More code overall (6 handlers + dispatcher vs 6 branches in one function)
+- ❌ Slight duplication: most handlers call `saveIfChanged` explicitly, where the old `reply`/`noReply` closures handled it once each
+
+---
+
+## 14. `getTimerActionsOnRoleChange`: Pure Function vs Side-Effect Mix
+
+`NodeTimer.getTimerActionsOnRoleChange` was refactored from a function that both computed timer actions AND broadcast heartbeats on leader promotion into a pure function that only computes timer actions. The broadcast was moved to the callers (`handleRaftRPC`, `handleLocalMessage`).
+
+**Rationale**: A function named `getTimerActions*` should not have side effects. The heartbeat broadcast on leader promotion is a separate concern that should be visible at the call site.
+
+**Trade-offs**:
+- ✅ Pure function — testable without `ctx` or network I/O
+- ✅ Callers explicitly handle leader promotion broadcast, making the flow visible
+- ✅ No implicit side effects from a "query"-named function
+- ❌ Callers must remember to broadcast on leader promotion (but the pattern is simple: `if oldRole <> Leader && newState.Role = Leader then broadcast`)
+- ❌ Slight duplication: two callers have the same promotion broadcast check
+
+---
+
+## 15. Inlined `commitAndBroadcast` vs Hidden Micro-Orchestrator
+
+`NodeLocal.commitAndBroadcast` was removed and its pipeline (save → broadcast → apply → autoSnapshot → finalize) was inlined at its two call sites (`appendAsLeader`, `handleRemovePeer`).
+
+**Rationale**: The original function hid a 5-step pipeline behind a short, generic name. The caller had no visibility into which side effects were being executed without reading the helper.
+
+**Trade-offs**:
+- ✅ Each call site explicitly shows the full post-commit pipeline
+- ✅ No hidden side effects — readers can see save, broadcast, apply, snapshot, and finalize at the call site
+- ❌ Code duplication (two copies of the same 5-step pipeline)
+- ❌ If the pipeline changes, both call sites must be updated (mitigated: simple pipeline with stable steps)
+
+---
+
+## 16. Extracted Pure `promoteReadyNonVotingPeers` vs Monolithic `tryPromoteNonVotingPeers`
+
+`NodePromotion.tryPromoteNonVotingPeers` was split into a pure function `promoteReadyNonVotingPeers` (state transformation only) and the existing I/O wrapper.
+
+**Rationale**: The original function mixed pure state computation (filtering ready peers, constructing new state, appending joint consensus) with I/O (save, broadcast, apply, snapshot, finalize) in a single dense block.
+
+**Trade-offs**:
+- ✅ Pure state transformation is testable without `ctx` or I/O mocks
+- ✅ The I/O wrapper is clearly separated from the pure logic
+- ✅ No behavior change — the I/O wrapper calls the pure function and adds side effects
+- ❌ Two functions instead of one — more names to navigate

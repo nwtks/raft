@@ -9,7 +9,7 @@ let private makeSnapshotCtx state =
         OnGetSnapshotData = fun () -> "snap_data" }
 
 [<Fact>]
-let ``NodeSnapshot.handleTakeSnapshot creates snapshot at lastApplied index with given data`` () =
+let ``NodeSnapshot.handleTakeSnapshot creates snapshot at LastApplied index with given data`` () =
     let mutable state = State.init dummyConfig None
     state <- State.initLeaderState state
     state <- Replication.appendCommand "x" state
@@ -96,7 +96,7 @@ let ``NodeSnapshot.autoSnapshotIfNeeded creates snapshot when log entry count re
     Assert.Equal("snap_data", result.Persistent.Snapshot.Value.StateMachineData)
 
 [<Fact>]
-let ``NodeSnapshot.autoSnapshotIfNeeded uses existing snapshot lastIndex when computing log count`` () =
+let ``NodeSnapshot.autoSnapshotIfNeeded uses existing Snapshot.LastIndex for log count`` () =
     let config =
         { dummyConfig with
             SnapshotAutoThreshold = 2 }
@@ -156,7 +156,7 @@ let ``NodeSnapshot.autoSnapshotIfNeeded is no-op when SnapshotAutoThreshold is 0
     Assert.Same(state, result)
 
 [<Fact>]
-let ``NodeSnapshot.autoSnapshotIfNeeded is no-op when log entry count is below threshold`` () =
+let ``NodeSnapshot.autoSnapshotIfNeeded is no-op when log entry count below threshold`` () =
     let config =
         { dummyConfig with
             SnapshotAutoThreshold = 10 }

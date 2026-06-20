@@ -5,7 +5,7 @@ open Raft
 open TestHelpers
 
 [<Fact>]
-let ``NodePromotion.tryFinalizeConfiguration appends FinalConfiguration when last entry is JointChange`` () =
+let ``NodePromotion.tryFinalizeConfiguration appends FinalChange after JointChange entry`` () =
     let mutable state = State.initLeaderState (State.init dummyConfig None)
     let c2 = dummyConfig.Peers |> List.filter (fun p -> p.Id = 2)
     let c3 = dummyConfig.Peers |> List.filter (fun p -> p.Id = 3)
@@ -26,7 +26,7 @@ let ``NodePromotion.tryFinalizeConfiguration appends FinalConfiguration when las
     Assert.StartsWith(ConfigChange.ConfigCommandPrefix, lastEntry.Value.Command)
 
 [<Fact>]
-let ``NodePromotion.tryFinalizeConfiguration appends FinalConfiguration when last entry is a normal command`` () =
+let ``NodePromotion.tryFinalizeConfiguration appends FinalChange when last entry is a normal command`` () =
     let mutable state = State.initLeaderState (State.init dummyConfig None)
     state <- Replication.appendCommand "cmd1" state
     let preState = state
@@ -81,6 +81,57 @@ let ``NodePromotion.getReadyPeers returns empty when LeaderState is None`` () =
     let state = State.init dummyConfig None
     let ready = NodePromotion.getReadyPeers state
     Assert.Empty ready
+
+[<Fact>]
+let ``NodePromotion.promoteReadyNonVotingPeers promotes caught-up peer and appends joint consensus`` () =
+    let config = configWithPeers 1 0
+    let state = State.initLeaderState (State.init config None)
+
+    let newPeer = { Id = 4; Host = "127.0.0.1"; Port = 0 }
+
+    let addedState =
+        { state with
+            NonVotingPeers = newPeer :: state.NonVotingPeers
+            LeaderState =
+                state.LeaderState
+                |> Option.map (fun ls ->
+                    { ls with
+                        NextIndex = ls.NextIndex |> Map.add newPeer.Id (Log.lastIndex state.Persistent.Log + 1L)
+                        MatchIndex = ls.MatchIndex |> Map.add newPeer.Id Log.initialLogIndex }) }
+
+    let stateWithMatch =
+        { addedState with
+            LeaderState =
+                addedState.LeaderState
+                |> Option.map (fun ls ->
+                    { ls with
+                        MatchIndex = ls.MatchIndex |> Map.add newPeer.Id (Log.lastIndex addedState.Persistent.Log) }) }
+
+    let result = NodePromotion.promoteReadyNonVotingPeers stateWithMatch
+    Assert.False(result.NonVotingPeers |> List.exists (fun p -> p.Id = newPeer.Id))
+    Assert.Equal(2, result.Persistent.Log.Count)
+    Assert.StartsWith(ConfigChange.ConfigCommandPrefix, (Map.find 2L result.Persistent.Log).Command)
+
+[<Fact>]
+let ``NodePromotion.promoteReadyNonVotingPeers returns same state when no peer is caught up`` () =
+    let config = configWithPeers 1 0
+    let state = State.initLeaderState (State.init config None)
+
+    let newPeer = { Id = 4; Host = "127.0.0.1"; Port = 0 }
+
+    let stateWithPeer =
+        { state with
+            NonVotingPeers = newPeer :: state.NonVotingPeers
+            LeaderState =
+                state.LeaderState
+                |> Option.map (fun ls ->
+                    { ls with
+                        NextIndex = ls.NextIndex |> Map.add newPeer.Id (Log.lastIndex state.Persistent.Log + 1L)
+                        MatchIndex = ls.MatchIndex |> Map.add newPeer.Id Log.initialLogIndex }) }
+
+    let result = NodePromotion.promoteReadyNonVotingPeers stateWithPeer
+    Assert.Contains(newPeer, result.NonVotingPeers)
+    Assert.Same(stateWithPeer, result)
 
 [<Fact>]
 let ``NodePromotion.tryPromoteNonVotingPeers promotes caught-up non-voting peer`` () =

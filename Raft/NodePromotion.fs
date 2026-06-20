@@ -27,24 +27,29 @@ module NodePromotion =
             |> List.filter (fun p -> ls.MatchIndex |> Map.tryFind p.Id |> Option.defaultValue -1L >= lastIndex)
         | None -> []
 
+    let promoteReadyNonVotingPeers state =
+        match getReadyPeers state with
+        | [] -> state
+        | readyPeers ->
+            let caughtUpIds = readyPeers |> List.map (fun p -> p.Id) |> Set.ofList
+
+            let remainingNonVoting =
+                state.NonVotingPeers |> List.filter (fun p -> not (caughtUpIds.Contains p.Id))
+
+            let oldPeers = state.Config.Peers
+            let allVoting = List.append oldPeers readyPeers
+
+            { state with
+                NonVotingPeers = remainingNonVoting }
+            |> Replication.appendJointConsensus oldPeers allVoting
+
     let tryPromoteNonVotingPeers ctx state =
         if state.Role = Leader && not (List.isEmpty state.NonVotingPeers) then
-            match getReadyPeers state with
-            | [] -> state
-            | readyPeers ->
-                let caughtUpIds = readyPeers |> List.map (fun p -> p.Id) |> Set.ofList
+            let newState = promoteReadyNonVotingPeers state
 
-                let remainingNonVoting =
-                    state.NonVotingPeers |> List.filter (fun p -> not (caughtUpIds.Contains p.Id))
-
-                let oldPeers = state.Config.Peers
-                let allVoting = List.append oldPeers readyPeers
-
-                let newState =
-                    { state with
-                        NonVotingPeers = remainingNonVoting }
-                    |> Replication.appendJointConsensus oldPeers allVoting
-
+            if newState = state then
+                state
+            else
                 NodeUtil.saveIfChanged ctx newState
                 NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport newState
 

@@ -11,36 +11,6 @@ let makeLeaderWithPeerConfig () =
     state
 
 [<Fact>]
-let ``NodeLocal.commitAndBroadcast persists state, calls apply for committed entries, and returns final state`` () =
-    let initial = State.init dummyConfig None
-    let persistence = MockPersistence() :> IPersistence
-    let mutable appliedCount = 0
-
-    let ctx =
-        { makeNodeContext initial with
-            Persistence = persistence
-            OnApply = fun _ -> appliedCount <- appliedCount + 1 }
-
-    let logWithEntry = initial.Persistent.Log |> Log.append 1L "test_cmd"
-
-    let stateWithEntry =
-        { initial with
-            Persistent =
-                { initial.Persistent with
-                    Log = logWithEntry }
-            Volatile =
-                { initial.Volatile with
-                    CommitIndex = 1L } }
-
-    let result = NodeLocal.commitAndBroadcast ctx stateWithEntry
-    let loaded = persistence.Load()
-    Assert.True loaded.IsSome
-    Assert.Equal(stateWithEntry.Persistent.CurrentTerm, loaded.Value.CurrentTerm)
-    Assert.Equal(1, appliedCount)
-    Assert.Equal(stateWithEntry.Role, result.Role)
-    Assert.Equal(stateWithEntry.Persistent.Log.Count, result.Persistent.Log.Count)
-
-[<Fact>]
 let ``NodeLocal.handleClientCommand returns Redirect when node is not leader`` () =
     let ctx = makeDefaultNodeContext ()
     let _, result = NodeLocal.handleClientCommand ctx "put a 1" None None
@@ -89,7 +59,7 @@ let ``NodeLocal.handleClientCommand with session appends entry with ClientId and
     Assert.Equal(Some 1L, entry.SeqNum)
 
 [<Fact>]
-let ``NodeLocal.handleClientCommand returns Accepted for duplicate session command when leader`` () =
+let ``NodeLocal.handleClientCommand returns Accepted for duplicate session on leader`` () =
     let mutable state = makeLeaderWithPeerConfig ()
     state <- State.updateSessionTable "client-1" 3L state
     let ctx = makeNodeContext state
@@ -101,7 +71,7 @@ let ``NodeLocal.handleClientCommand returns Accepted for duplicate session comma
     Assert.Equal(1, resultState.Persistent.Log.Count)
 
 [<Fact>]
-let ``NodeLocal.handleClientCommand returns Accepted for older seqNum after higher seqNum when leader`` () =
+let ``NodeLocal.handleClientCommand accepts older seqNum after higher seqNum`` () =
     let mutable state = makeLeaderWithPeerConfig ()
     state <- State.updateSessionTable "client-1" 2L state
     let ctx = makeNodeContext state
@@ -226,3 +196,30 @@ let ``NodeLocal.dispatchLocalMessage dispatches RemovePeer and calls reply`` () 
     Assert.True captured
     Assert.Equal(2, result.Persistent.Log.Count)
     Assert.Contains(transport.Messages, fun (p, _) -> p.Id = 2)
+
+[<Fact>]
+let ``NodeLocal.handleLocalMessage keeps Keep Keep for ClientCommand on Follower`` () =
+    let ctx = makeDefaultNodeContext ()
+    Assert.Equal(Follower, ctx.State.Role)
+
+    let result =
+        NodeLocal.handleLocalMessage ctx (ClientCommand("cmd", None, None, ignore))
+
+    Assert.Equal(Follower, result.State.Role)
+    Assert.Equal(Keep, result.ElectionAction)
+    Assert.Equal(Keep, result.HeartbeatAction)
+    Assert.Empty result.PendingReads
+
+[<Fact>]
+let ``NodeLocal.handleLocalMessage keeps Keep Keep for ClientCommand on Leader`` () =
+    let state = makeLeaderWithPeerConfig ()
+    let ctx = makeNodeContext state
+
+    let result =
+        NodeLocal.handleLocalMessage ctx (ClientCommand("cmd", None, None, ignore))
+
+    Assert.Equal(Leader, result.State.Role)
+    Assert.Equal(2, result.State.Persistent.Log.Count)
+    Assert.Equal(Keep, result.ElectionAction)
+    Assert.Equal(Keep, result.HeartbeatAction)
+    Assert.Empty result.PendingReads

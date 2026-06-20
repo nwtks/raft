@@ -5,7 +5,7 @@ open Raft
 open TestHelpers
 
 [<Fact>]
-let ``NodeRaft.handleRaftRPC handles RequestVoteMsg by granting vote to candidate with higher term`` () =
+let ``NodeRaft.handleRaftRPC grants vote on RequestVoteMsg from higher term`` () =
     let state = State.init dummyConfig None
     let ctx, transport = makeNodeContextWithTransport state
 
@@ -28,7 +28,7 @@ let ``NodeRaft.handleRaftRPC handles RequestVoteMsg by granting vote to candidat
     | _ -> Assert.Fail "Expected RequestVoteResponseMsg"
 
 [<Fact>]
-let ``NodeRaft.handleRaftRPC rejects RequestVoteMsg from candidate with lower term`` () =
+let ``NodeRaft.handleRaftRPC rejects RequestVoteMsg from lower term candidate`` () =
     let state = State.updateTerm 2L (State.init dummyConfig None)
     let ctx, transport = makeNodeContextWithTransport state
 
@@ -50,7 +50,7 @@ let ``NodeRaft.handleRaftRPC rejects RequestVoteMsg from candidate with lower te
     | _ -> Assert.Fail "Expected RequestVoteResponseMsg"
 
 [<Fact>]
-let ``NodeRaft.handleRaftRPC handles RequestVoteMsg from unknown peer without sending response`` () =
+let ``NodeRaft.handleRaftRPC omits response for RequestVoteMsg from unknown peer`` () =
     let state = State.init dummyConfig None
     let ctx, transport = makeNodeContextWithTransport state
 
@@ -65,7 +65,7 @@ let ``NodeRaft.handleRaftRPC handles RequestVoteMsg from unknown peer without se
     Assert.DoesNotContain(transport.Messages, fun (p, _) -> p.Id = 99)
 
 [<Fact>]
-let ``NodeRaft.handleRaftRPC promotes candidate to leader on majority RequestVoteResponse`` () =
+let ``NodeRaft.handleRaftRPC promotes to leader on majority RequestVoteResponse`` () =
     let state = Election.startElection (State.init dummyConfig None)
     let ctx = makeNodeContext state
     Assert.Equal(Candidate, ctx.State.Role)
@@ -82,7 +82,7 @@ let ``NodeRaft.handleRaftRPC promotes candidate to leader on majority RequestVot
     Assert.Equal(1L, result.State.Persistent.CurrentTerm)
 
 [<Fact>]
-let ``NodeRaft.handleRaftRPC stays candidate without majority on partial RequestVoteResponse`` () =
+let ``NodeRaft.handleRaftRPC stays candidate on partial RequestVoteResponse`` () =
     let config5Nodes =
         { dummyConfig with
             Peers =
@@ -104,7 +104,7 @@ let ``NodeRaft.handleRaftRPC stays candidate without majority on partial Request
     Assert.Equal(2, result.State.VotesReceived.Count)
 
 [<Fact>]
-let ``NodeRaft.handleRaftRPC ignores duplicate RequestVoteResponse from same peer`` () =
+let ``NodeRaft.handleRaftRPC ignores duplicate RequestVoteResponse`` () =
     let state = Election.startElection (State.init dummyConfig None)
     let ctx = makeNodeContext state
 
@@ -136,7 +136,7 @@ let ``NodeRaft.handleRaftRPC steps down on RequestVoteResponse with higher term`
     Assert.True result.State.LeaderState.IsNone
 
 [<Fact>]
-let ``NodeRaft.handleRaftRPC handles AppendEntriesMsg from higher term leader`` () =
+let ``NodeRaft.handleRaftRPC accepts AppendEntriesMsg from higher term leader`` () =
     let state = State.init dummyConfig None
     let ctx, transport = makeNodeContextWithTransport state
 
@@ -163,7 +163,7 @@ let ``NodeRaft.handleRaftRPC handles AppendEntriesMsg from higher term leader`` 
     | _ -> Assert.Fail "Expected AppendEntriesResponseMsg"
 
 [<Fact>]
-let ``NodeRaft.handleRaftRPC handles AppendEntriesMsg with new log entries`` () =
+let ``NodeRaft.handleRaftRPC appends entries on AppendEntriesMsg`` () =
     let state = State.init dummyConfig None
     let ctx, transport = makeNodeContextWithTransport state
 
@@ -215,7 +215,7 @@ let ``NodeRaft.handleRaftRPC rejects AppendEntriesMsg from stale term leader`` (
     | _ -> Assert.Fail "Expected rejected AppendEntriesResponseMsg"
 
 [<Fact>]
-let ``NodeRaft.handleRaftRPC handles AppendEntriesMsg from unknown leader without sending response`` () =
+let ``NodeRaft.handleRaftRPC omits response for AppendEntriesMsg from unknown leader`` () =
     let state = State.init dummyConfig None
     let ctx, transport = makeNodeContextWithTransport state
 
@@ -231,7 +231,7 @@ let ``NodeRaft.handleRaftRPC handles AppendEntriesMsg from unknown leader withou
     Assert.DoesNotContain(transport.Messages, fun (p, _) -> p.Id = 99)
 
 [<Fact>]
-let ``NodeRaft.handleRaftRPC updates match index on successful AppendEntriesResponse`` () =
+let ``NodeRaft.handleRaftRPC updates match index on AppendEntriesResponse`` () =
     let state =
         State.initLeaderState (State.updateTerm 1L (State.init dummyConfig None))
 
@@ -275,7 +275,7 @@ let ``NodeRaft.handleRaftRPC steps down on AppendEntriesResponse with higher ter
     Assert.True result.State.LeaderState.IsNone
 
 [<Fact>]
-let ``NodeRaft.handleRaftRPC handles AppendEntriesResponse with conflict term and decrements NextIndex`` () =
+let ``NodeRaft.handleRaftRPC decrements NextIndex on AppendEntriesResponse with conflict term`` () =
     let mutable state =
         State.initLeaderState (State.updateTerm 1L (State.init dummyConfig None))
 
@@ -308,7 +308,7 @@ let ``NodeRaft.handleRaftRPC handles AppendEntriesResponse with conflict term an
     | None -> Assert.Fail "Expected LeaderState"
 
 [<Fact>]
-let ``NodeRaft.handleRaftRPC handles InstallSnapshotMsg from leader and installs snapshot`` () =
+let ``NodeRaft.handleRaftRPC installs snapshot on InstallSnapshotMsg from leader`` () =
     let mutable installedData = ""
     let state = State.init dummyConfig None
     let ctx, transport = makeNodeContextWithTransport state
@@ -361,7 +361,7 @@ let ``NodeRaft.handleRaftRPC rejects InstallSnapshotMsg from stale term leader``
     | _ -> Assert.Fail "Expected unsuccessful InstallSnapshotResponseMsg"
 
 [<Fact>]
-let ``NodeRaft.handleRaftRPC handles InstallSnapshotMsg from unknown leader without sending response`` () =
+let ``NodeRaft.handleRaftRPC omits response for InstallSnapshotMsg from unknown leader`` () =
     let state = State.init dummyConfig None
     let ctx, transport = makeNodeContextWithTransport state
 
@@ -376,7 +376,7 @@ let ``NodeRaft.handleRaftRPC handles InstallSnapshotMsg from unknown leader with
     Assert.DoesNotContain(transport.Messages, fun (p, _) -> p.Id = 99)
 
 [<Fact>]
-let ``NodeRaft.handleRaftRPC updates match index on successful InstallSnapshotResponse`` () =
+let ``NodeRaft.handleRaftRPC updates match index on InstallSnapshotResponse`` () =
     let state =
         State.initLeaderState (State.updateTerm 1L (State.init dummyConfig None))
 

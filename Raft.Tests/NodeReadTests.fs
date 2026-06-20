@@ -5,7 +5,7 @@ open Raft
 open TestHelpers
 
 [<Fact>]
-let ``NodeRead.canServePendingRead returns true when leader has committed entry in current term with quorum`` () =
+let ``NodeRead.canServePendingRead returns true with committed entry and quorum`` () =
     let mutable state =
         State.initLeaderState (State.updateTerm 1L (State.init dummyConfig None))
 
@@ -43,7 +43,7 @@ let ``NodeRead.canServePendingRead returns false when commit index is 0`` () =
     Assert.False(NodeRead.canServePendingRead state pendingRead)
 
 [<Fact>]
-let ``NodeRead.canServePendingRead returns false when commit index term != current term`` () =
+let ``NodeRead.canServePendingRead returns false when commit index term differs from current term`` () =
     let mutable state = State.initLeaderState (State.init dummyConfig None)
 
     state <-

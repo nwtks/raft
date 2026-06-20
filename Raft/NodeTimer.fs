@@ -46,14 +46,12 @@ module NodeTimer =
             HeartbeatTimeout
             ctx
 
-    let getTimerActionsOnRoleChange ctx oldRole newState sendReply =
+    let getTimerActionsOnRoleChange oldRole newState sendReply =
         let wasLeader = oldRole = Leader
         let isLeader = newState.Role = Leader
 
         match wasLeader, isLeader with
-        | false, true ->
-            NodeBroadcaster.broadcastHeartbeat ctx.Config ctx.Transport newState
-            Stop, Reset
+        | false, true -> Stop, Reset
         | true, false -> Reset, Stop
         | _ when sendReply -> Reset, Keep
         | _ -> Keep, Keep

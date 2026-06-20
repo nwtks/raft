@@ -69,7 +69,7 @@ let ``NodeTimer.applyHeartbeatAction returns ctx.HeartbeatTimer for Keep`` () =
     Assert.Equal(ctx.HeartbeatTimer, result)
 
 [<Fact>]
-let ``NodeTimer.applyHeartbeatAction Reset updates existing timer when present`` () =
+let ``NodeTimer.applyHeartbeatAction Reset updates existing timer`` () =
     let ctx = makeDefaultNodeContext ()
     let timer = NodeTimer.createTimer ctx.Inbox HeartbeatTimeout 10000
     let ctxWithTimer = { ctx with HeartbeatTimer = Some timer }
@@ -85,7 +85,7 @@ let ``NodeTimer.applyHeartbeatAction Reset creates new timer when None`` () =
     Assert.True result.IsSome
 
 [<Fact>]
-let ``NodeTimer.applyHeartbeatAction Stop disables existing timer when present`` () =
+let ``NodeTimer.applyHeartbeatAction Stop disables existing timer`` () =
     let ctx = makeDefaultNodeContext ()
     let timer = NodeTimer.createTimer ctx.Inbox HeartbeatTimeout 10000
     let ctxWithTimer = { ctx with HeartbeatTimer = Some timer }
@@ -105,8 +105,7 @@ let ``NodeTimer.getTimerActionsOnRoleChange returns Keep Keep when role unchange
     let ctx = makeDefaultNodeContext ()
     let state = ctx.State
 
-    let election, heartbeat =
-        NodeTimer.getTimerActionsOnRoleChange ctx Follower state false
+    let election, heartbeat = NodeTimer.getTimerActionsOnRoleChange Follower state false
 
     Assert.Equal(Keep, election)
     Assert.Equal(Keep, heartbeat)

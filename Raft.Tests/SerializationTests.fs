@@ -14,6 +14,59 @@ let roundTrip (msg: RaftMessage) =
     System.Text.Json.JsonSerializer.Deserialize<RaftMessage>(json, jsonOptions)
 
 [<Fact>]
+let ``OptionConverter.Read returns None for JSON null token`` () =
+    let converter = OptionConverter<int>()
+    let jsonBytes = System.Text.Encoding.UTF8.GetBytes "null"
+    let mutable reader = System.Text.Json.Utf8JsonReader jsonBytes
+    reader.Read() |> ignore
+    let result: int option = converter.Read(&reader, typeof<int option>, jsonOptions)
+    Assert.Equal(None, result)
+
+[<Fact>]
+let ``OptionConverter.Write writes null for None value`` () =
+    let converter = OptionConverter<int>()
+    use stream = new System.IO.MemoryStream()
+    use writer = new System.Text.Json.Utf8JsonWriter(stream)
+    converter.Write(writer, None, jsonOptions)
+    writer.Flush()
+    let json = System.Text.Encoding.UTF8.GetString(stream.ToArray())
+    Assert.Equal("null", json)
+
+[<Fact>]
+let ``OptionConverter round-trips Some string and numeric values`` () =
+    let value: string option = Some "hello"
+    let json = System.Text.Json.JsonSerializer.Serialize(value, jsonOptions)
+
+    let deserialized: string option =
+        System.Text.Json.JsonSerializer.Deserialize<string option>(json, jsonOptions)
+
+    Assert.Equal(Some "hello", deserialized)
+
+    let valueN: int64 option = Some 42L
+    let jsonN = System.Text.Json.JsonSerializer.Serialize(valueN, jsonOptions)
+
+    let deserializedN: int64 option =
+        System.Text.Json.JsonSerializer.Deserialize<int64 option>(jsonN, jsonOptions)
+
+    Assert.Equal(Some 42L, deserializedN)
+
+[<Fact>]
+let ``OptionConverterFactory.CanConvert returns false for non-option generic type`` () =
+    let factory = OptionConverterFactory()
+    Assert.False(factory.CanConvert typeof<System.Collections.Generic.List<int>>)
+
+[<Fact>]
+let ``Deserializing invalid case name throws JsonException`` () =
+    let badJson = """{"Case":"NonExistentMsg","Fields":[]}"""
+
+    let ex =
+        Assert.Throws<System.Exception>(fun () ->
+            System.Text.Json.JsonSerializer.Deserialize<RaftMessage>(badJson, jsonOptions)
+            |> ignore)
+
+    Assert.Contains("Unknown message case", ex.Message)
+
+[<Fact>]
 let ``RequestVoteMsg round-trips through JSON`` () =
     let original =
         RequestVoteMsg
@@ -194,59 +247,6 @@ let ``InstallSnapshotResponseMsg round-trips through JSON`` () =
         Assert.True snapResp.Success
         Assert.Equal(50L, snapResp.LastIncludedIndex)
     | _ -> Assert.Fail "Wrong message type"
-
-[<Fact>]
-let ``OptionConverter.Read returns None for JSON null token`` () =
-    let converter = OptionConverter<int>()
-    let jsonBytes = System.Text.Encoding.UTF8.GetBytes "null"
-    let mutable reader = System.Text.Json.Utf8JsonReader jsonBytes
-    reader.Read() |> ignore
-    let result: int option = converter.Read(&reader, typeof<int option>, jsonOptions)
-    Assert.Equal(None, result)
-
-[<Fact>]
-let ``OptionConverter.Write writes null for None value`` () =
-    let converter = OptionConverter<int>()
-    use stream = new System.IO.MemoryStream()
-    use writer = new System.Text.Json.Utf8JsonWriter(stream)
-    converter.Write(writer, None, jsonOptions)
-    writer.Flush()
-    let json = System.Text.Encoding.UTF8.GetString(stream.ToArray())
-    Assert.Equal("null", json)
-
-[<Fact>]
-let ``OptionConverter round-trips Some string and numeric values`` () =
-    let value: string option = Some "hello"
-    let json = System.Text.Json.JsonSerializer.Serialize(value, jsonOptions)
-
-    let deserialized: string option =
-        System.Text.Json.JsonSerializer.Deserialize<string option>(json, jsonOptions)
-
-    Assert.Equal(Some "hello", deserialized)
-
-    let valueN: int64 option = Some 42L
-    let jsonN = System.Text.Json.JsonSerializer.Serialize(valueN, jsonOptions)
-
-    let deserializedN: int64 option =
-        System.Text.Json.JsonSerializer.Deserialize<int64 option>(jsonN, jsonOptions)
-
-    Assert.Equal(Some 42L, deserializedN)
-
-[<Fact>]
-let ``Deserializing invalid case name throws JsonException`` () =
-    let badJson = """{"Case":"NonExistentMsg","Fields":[]}"""
-
-    let ex =
-        Assert.Throws<System.Exception>(fun () ->
-            System.Text.Json.JsonSerializer.Deserialize<RaftMessage>(badJson, jsonOptions)
-            |> ignore)
-
-    Assert.Contains("Unknown message case", ex.Message)
-
-[<Fact>]
-let ``OptionConverterFactory.CanConvert returns false for non-option generic type`` () =
-    let factory = OptionConverterFactory()
-    Assert.False(factory.CanConvert typeof<System.Collections.Generic.List<int>>)
 
 [<Fact>]
 let ``AppendEntriesMsg with Some ClientId and SeqNum round-trips`` () =

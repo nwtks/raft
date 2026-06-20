@@ -1,14 +1,6 @@
 namespace Raft
 
 module NodeLocal =
-    let commitAndBroadcast ctx state =
-        NodeUtil.saveIfChanged ctx state
-        NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state
-        let appliedState = NodeApply.applyCommitted ctx.OnApply state
-
-        NodeSnapshot.autoSnapshotIfNeeded ctx appliedState
-        |> NodePromotion.tryFinalizeConfiguration
-
     let appendAsLeader ctx cmd clientId seqNum =
         let isDuplicate =
             State.isDuplicateSession ctx.State.Persistent.SessionTable clientId seqNum
@@ -21,7 +13,15 @@ module NodeLocal =
                 | Some cId, Some sNum -> Replication.appendCommandWithSession cmd cId sNum ctx.State
                 | _ -> Replication.appendCommand cmd ctx.State
 
-            commitAndBroadcast ctx state, Accepted
+            NodeUtil.saveIfChanged ctx state
+            NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state
+            let appliedState = NodeApply.applyCommitted ctx.OnApply state
+
+            let finalState =
+                NodeSnapshot.autoSnapshotIfNeeded ctx appliedState
+                |> NodePromotion.tryFinalizeConfiguration
+
+            finalState, Accepted
 
     let redirectResult ctx =
         ctx.State.CurrentLeader
@@ -70,7 +70,15 @@ module NodeLocal =
             let oldPeers = ctx.State.Config.Peers
             let newPeers = oldPeers |> List.filter (fun p -> p.Id <> peerId)
             let state = Replication.appendJointConsensus oldPeers newPeers ctx.State
-            commitAndBroadcast ctx state, true
+            NodeUtil.saveIfChanged ctx state
+            NodeBroadcaster.broadcastAppendEntries ctx.Config ctx.Transport state
+            let appliedState = NodeApply.applyCommitted ctx.OnApply state
+
+            let finalState =
+                NodeSnapshot.autoSnapshotIfNeeded ctx appliedState
+                |> NodePromotion.tryFinalizeConfiguration
+
+            finalState, true
         else
             ctx.State, false
 
@@ -98,7 +106,7 @@ module NodeLocal =
         let remainingReads = NodeRead.processPendingReads ctx.PendingReads state
 
         let electionAction, heartbeatAction =
-            NodeTimer.getTimerActionsOnRoleChange ctx oldRole state false
+            NodeTimer.getTimerActionsOnRoleChange oldRole state false
 
         { State = state
           ElectionAction = electionAction

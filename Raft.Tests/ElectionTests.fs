@@ -92,7 +92,7 @@ let ``Election.handleRequestVote grants vote to candidate with up-to-date log``
     Assert.Equal(expectedVotedForOpt, newState.Persistent.VotedFor)
 
 [<Fact>]
-let ``Election.handleVoteResponse promotes node to leader upon receiving majority votes`` () =
+let ``Election.handleVoteResponse promotes to leader on majority votes`` () =
     let state = Election.startElection (State.init dummyConfig None)
 
     let resp =
@@ -130,7 +130,7 @@ let ``Election.handleVoteResponse records vote but stays candidate without major
     Assert.True newState.LeaderState.IsNone
 
 [<Fact>]
-let ``Election.handleVoteResponse updates current term when response carries a higher term`` () =
+let ``Election.handleVoteResponse updates term on response with higher term`` () =
     let state = Election.startElection (State.init dummyConfig None)
 
     let resp =
