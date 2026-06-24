@@ -1,7 +1,7 @@
 namespace Raft
 
 module Persistence =
-    let log msg = printfn "[Persistence] %s" msg
+    let log msg = eprintfn "[Persistence] %s" msg
 
     let save fileName state =
         let json = System.Text.Json.JsonSerializer.Serialize(state, JsonConfig.options)
@@ -39,7 +39,7 @@ module Persistence =
             None
 
 type FilePersistence(nodeId: NodeId) =
-    let fileName = sprintf "state_%d.json" nodeId
+    let fileName = $"state_{nodeId}.json"
 
     interface IPersistence with
         member _.Save state = Persistence.save fileName state

@@ -5,7 +5,7 @@ type ConfigChangeData =
     | FinalChange of peers: PeerInfo list
 
 module ConfigChange =
-    let log msg = printfn "[ConfigChange] %s" msg
+    let log msg = eprintfn "[ConfigChange] %s" msg
 
     [<Literal>]
     let ConfigCommandPrefix = "__raft_config:"

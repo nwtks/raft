@@ -1,7 +1,7 @@
 namespace Raft
 
 module NodeUtil =
-    let log msg = printfn "[Node] %s" msg
+    let log msg = eprintfn "[Node] %s" msg
 
     let sendAsync (transport: ITransport) peer msg =
         let sendOp =

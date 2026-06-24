@@ -33,7 +33,7 @@ Every `MessageResult` must explicitly set both `ElectionAction` and `HeartbeatAc
 
 **Why it's problematic**: A failure to send a message to a peer (e.g., connection refused, timeout) is logged but the caller receives no notification of failure. The Raft protocol is designed to tolerate lost messages (retries via heartbeat), but silent failures can mask network partition issues during debugging.
 
-**How to avoid**: For debugging, monitor the `[Node]` / `[Transport]` log output. In tests, use `MockTransport` which never fails — real network failures are only exercised in `TransportTests.fs`.
+**How to avoid**: For debugging, monitor the `[Node]` / `[Transport]` stderr output. In tests, use `MockTransport` which never fails — real network failures are only exercised in `TransportTests.fs`.
 
 ---
 

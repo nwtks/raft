@@ -10,7 +10,7 @@ let getTestNodeId () = System.Random().Next(10000, 99999)
 let ``FilePersistence.Save and Load round-trip state`` () =
     let nodeId = getTestNodeId ()
     let persistence = FilePersistence nodeId :> IPersistence
-    let fileName = sprintf "state_%d.json" nodeId
+    let fileName = $"state_{nodeId}.json"
 
     let originalState: PersistentState =
         { CurrentTerm = 42L
@@ -50,7 +50,7 @@ let ``FilePersistence.Save and Load round-trip state`` () =
 let ``FilePersistence.Save overwrites previously saved state with new state`` () =
     let nodeId = getTestNodeId ()
     let persistence = FilePersistence nodeId :> IPersistence
-    let fileName = sprintf "state_%d.json" nodeId
+    let fileName = $"state_{nodeId}.json"
 
     let state1: PersistentState =
         { CurrentTerm = 1L
@@ -89,7 +89,7 @@ let ``FilePersistence.Save overwrites previously saved state with new state`` ()
 let ``FilePersistence.Load returns None when state file does not exist`` () =
     let nodeId = getTestNodeId ()
     let persistence = FilePersistence nodeId :> IPersistence
-    let fileName = sprintf "state_%d.json" nodeId
+    let fileName = $"state_{nodeId}.json"
 
     if System.IO.File.Exists fileName then
         System.IO.File.Delete fileName
@@ -101,7 +101,7 @@ let ``FilePersistence.Load returns None when state file does not exist`` () =
 let ``FilePersistence.Load returns None for corrupted JSON file`` () =
     let nodeId = getTestNodeId ()
     let persistence = FilePersistence nodeId :> IPersistence
-    let fileName = sprintf "state_%d.json" nodeId
+    let fileName = $"state_{nodeId}.json"
 
     try
         System.IO.File.WriteAllText(fileName, "this is not valid JSON")
@@ -115,7 +115,7 @@ let ``FilePersistence.Load returns None for corrupted JSON file`` () =
 let ``FilePersistence.Load deletes orphaned .tmp file on startup`` () =
     let nodeId = getTestNodeId ()
     let persistence = FilePersistence nodeId :> IPersistence
-    let fileName = sprintf "state_%d.json" nodeId
+    let fileName = $"state_{nodeId}.json"
     let tempFileName = fileName + ".tmp"
 
     try

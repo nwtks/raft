@@ -14,7 +14,8 @@ The system is organized into four layers:
 ```
 ┌──────────────────────────────────────────────────────────┐
 │                    Application Layer                      │
-│   RaftNode (Node.fs)         Raft.App / User callbacks    │
+│   RaftNode (Node.fs)   Raft.App (Program.fs)             │
+│   AdminListener (AdminListener.fs)   User callbacks       │
 ├──────────────────────────────────────────────────────────┤
 │                   Agent / Actor Layer                     │
 │   NodeAgent.fs   NodeRaft.fs   NodeLocal.fs               │
@@ -66,7 +67,7 @@ The middle layer is built on F#'s `MailboxProcessor` (actor model). Each module 
 | `NodeBroadcaster.fs` | `broadcastRequestVote`, `broadcastHeartbeat`, `broadcastAppendEntries` (sends to both voting peers and `NonVotingPeers`), `sendAppendEntriesOrSnapshot` (falls back to `InstallSnapshot` when log is too far behind). |
 | `NodePromotion.fs` | `promoteReadyNonVotingPeers` (pure state transformation) — promotes non-voting peers whose `MatchIndex` catches up by appending a joint consensus entry. `tryPromoteNonVotingPeers` (I/O wrapper) — calls `promoteReadyNonVotingPeers`, then saves, broadcasts, applies, snapshots, and finalizes. `tryFinalizeConfiguration` — appends final configuration entry when in `JointPhase`. Also provides `applyAndCompact`, the post-processing pipeline (`applyCommitted` → `autoSnapshotIfNeeded` → `tryFinalizeConfiguration`) used by `NodeRaft` and `NodeLocal`. |
 | `NodeTimer.fs` | Centralized timer management — `getRandomElectionTimeout`, `createTimer`, `disposeTimer`, `applyElectionAction`, `applyHeartbeatAction`. `getTimerActionsOnRoleChange` returns `(TimerAction * TimerAction)` tuple based on old/new role transitions and whether a reply was sent. Handlers never touch `System.Threading.Timer` directly. |
-| `NodeUtil.fs` | `saveIfChanged` (idempotent persistence flush), `sendAsync` (fire-and-forget transport send with error logging), `log` (printfn wrapper). |
+| `NodeUtil.fs` | `saveIfChanged` (idempotent persistence flush), `sendAsync` (fire-and-forget transport send with error logging), `log` (`eprintfn` wrapper) |
 
 ### 3. I/O / Infrastructure Layer
 
@@ -81,7 +82,8 @@ The middle layer is built on F#'s `MailboxProcessor` (actor model). Each module 
 | File | Responsibility |
 |---|---|
 | `Node.fs` | `RaftNode` class — public API. Constructs the `MailboxProcessor`, starts the transport listener and the agent loop. Exposes `SubmitCommand`, `SubmitCommandWithSession`, `LinearizableRead`, `PostLinearizableRead`, `SubmitTakeSnapshot`, `AddPeer`, `RemovePeer`, `GetState`, `TriggerElectionTimeout`, `TriggerHeartbeatTimeout`. Constructor catches `SocketException`/`IOException` from `StartListener`, cleans up, and re-raises. Implements `IDisposable`. |
-| `Raft.App/Program.fs` | 3-node Key-Value Store demo with REPL. Commands: `put <key> <value>`, `get <key>` (via `LinearizableRead`), `state`, `quit`/`q`. |
+| `Raft.App/Program.fs` | Key-Value Store demo with REPL. Commands: `put`, `get` (via `LinearizableRead`), `state`, `dump`, `log`, `cluster`, `snapshot`, `election`, `heartbeat`, `add-peer`, `remove-peer`, `help`, `quit`/`q`. |
+| `Raft.App/AdminListener.fs` | Secondary TCP listener (raft port + 10000) for cluster auto-join requests — lets new nodes request non-voting membership at runtime. |
 
 ---
 
@@ -98,7 +100,9 @@ sequenceDiagram
     participant Replication
     participant NodeUtil
     participant NodeBroadcaster
+    participant NodePromotion
     participant NodeApply
+    participant NodeSnapshot
     participant Peer
 
     Client->>RaftNode: SubmitCommand(cmd)
@@ -116,10 +120,11 @@ sequenceDiagram
         NodeLocal->>NodeBroadcaster: broadcastAppendEntries
         NodeBroadcaster->>Peer: AppendEntries RPC
 
-        NodeLocal->>NodeApply: applyCommitted
-        NodeApply-->>NodeLocal: appliedState
-
-        NodeLocal->>NodeLocal: autoSnapshot / tryFinalizeConfig
+        NodeLocal->>NodePromotion: applyAndCompact
+        NodePromotion->>NodeApply: applyCommitted
+        NodePromotion->>NodeSnapshot: autoSnapshotIfNeeded
+        NodePromotion->>NodePromotion: tryFinalizeConfiguration
+        NodePromotion-->>NodeLocal: compactedState
         NodeLocal->>Client: reply Accepted
     else not Leader
         NodeLocal->>Client: reply Redirect(leaderInfo)

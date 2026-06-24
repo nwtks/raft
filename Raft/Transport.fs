@@ -1,7 +1,7 @@
 namespace Raft
 
 module Transport =
-    let log msg = printfn "[Transport] %s" msg
+    let log msg = eprintfn "[Transport] %s" msg
 
     let createAndStartListener port =
         let listener = new System.Net.Sockets.TcpListener(System.Net.IPAddress.Any, port)

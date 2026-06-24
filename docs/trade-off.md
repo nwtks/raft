@@ -101,7 +101,7 @@ Cyclomatic complexity is enforced via a hybrid approach: Coverlet's coverage XML
 **Rationale**: `Microsoft.CodeAnalysis.Metrics` does not support F#. Pure IL-level metrics from Coverlet are available but don't always match source-level McCabe complexity for F# constructs like computation expressions and closures. A source-level approach gives more predictable results for an F# codebase. The Coverlet XML is reused for method discovery to avoid re-parsing all source files independently.
 
 **Trade-offs**:
-- ✅ No new dependencies — Coverlet is already a project dependency; the script uses only `System.Text.RegularExpressions` and `System.Xml.Linq`
+- ✅ No new dependencies — Coverlet (`coverlet.msbuild`) is already a test-project dependency; the script uses `System.IO`, `System.Text.RegularExpressions`, and `System.Xml.Linq`
 - ✅ Complexity matches source code structure, not IL compiler artifacts
 - ✅ Single `dotnet test` run produces both coverage and complexity data
 - ✅ MSBuild integration via `CheckComplexityAfterCoverage` target (in `Directory.Build.targets`) which runs the script after `GenerateCoverageResultAfterTest`
@@ -159,13 +159,13 @@ The log is stored as `Map<LogIndex, LogEntry>` (an immutable sorted map) rather 
 
 ## 11. printfn Logging
 
-The codebase uses `printfn` directly rather than a structured logging library (`ILogger`, Serilog, etc.).
+The codebase uses `eprintfn` directly rather than a structured logging library (`ILogger`, Serilog, etc.).
 
-**Rationale**: Zero external dependencies. The output is human-readable and sufficient for debugging and development. Production deployments can redirect stdout.
+**Rationale**: Zero external dependencies. The output is human-readable and sufficient for debugging and development. Stderr is used so log output does not interfere with application stdout.
 
 **Trade-offs**:
 - ✅ No dependencies, no configuration, no DI wiring
-- ✅ Every module has a local `let log msg = printfn "[Tag] %s" msg` wrapper
+- ✅ Every module has a local `let log msg = eprintfn "[Tag] %s" msg` wrapper
 - ❌ No log levels (Info/Warn/Error), no structured fields, no filtering
 - ❌ Heavily concurrent or production environments would benefit from timestamped, level-filtered, structured output
 - ❌ Test output includes real log lines (mitigated by `MockTransport` not logging)
