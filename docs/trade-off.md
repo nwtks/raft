@@ -3,9 +3,6 @@
 This document catalogs significant design trade-offs made in this Raft implementation.
 Each entry describes the decision, the alternatives considered, and the resulting pros/cons.
 
-See [docs/architecture.md](architecture.md) for the full architecture description.
-See [docs/gotchas.md](gotchas.md) for common mistakes and gotchas.
-
 ---
 
 ## 1. ITransport: `Async<unit>` vs `Task<unit>`

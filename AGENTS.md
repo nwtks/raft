@@ -68,32 +68,7 @@ The entire codebase, including test code, must run on both Windows and Linux.
 
 ## Test Suite
 
-Test files mirror the source module structure — one test file per source module, plus integration/transport tests. All test files under `Raft.Tests/`:
-
-| Test File | Covers |
-|---|---|
-| `IntegrationTests.fs` | End-to-end Raft scenarios (leader election, log replication, log inconsistency recovery, split-brain, stale leader rejection) — pure function calls, no TCP/actor/timers |
-| `TransportTests.fs` | Real TCP sockets on loopback (uses dynamic port allocation — no hardcoded ports) |
-| `ElectionTests.fs` | `Election.fs` |
-| `ReplicationTests.fs` | `Replication.fs` |
-| `LogTests.fs` | `Log.fs` |
-| `StateTests.fs` | `State.fs` |
-| `ConfigChangeTests.fs` | `ConfigChange.fs` |
-| `SerializationTests.fs` | `Serialization.fs` |
-| `PersistenceTests.fs` | `Persistence.fs` |
-| `NodeTests.fs` | `Node.fs` (`RaftNode` public API) |
-| `NodeAgentTests.fs` | `NodeAgent.fs` |
-| `NodeRaftTests.fs` | `NodeRaft.fs` |
-| `NodeLocalTests.fs` | `NodeLocal.fs` |
-| `NodeTimeoutTests.fs` | `NodeTimeout.fs` |
-| `NodeReadTests.fs` | `NodeRead.fs` |
-| `NodeSnapshotTests.fs` | `NodeSnapshot.fs` |
-| `NodeApplyTests.fs` | `NodeApply.fs` |
-| `NodeBroadcasterTests.fs` | `NodeBroadcaster.fs` |
-| `NodePromotionTests.fs` | `NodePromotion.fs` |
-| `NodeTimerTests.fs` | `NodeTimer.fs` |
-| `NodeUtilTests.fs` | `NodeUtil.fs` |
-| `TestHelpers.fs` | Shared test utilities (factory functions, setup helpers) |
+Test files mirror the source module structure — one test file per source module, plus integration/transport tests.
 
 **`IntegrationTests.fs`** exercises end-to-end Raft scenarios by calling the pure `Election`, `Replication`, and `State` module functions directly — **no TCP sockets, no `RaftNode` actor, no real timers**. These tests are fast and deterministic.
 

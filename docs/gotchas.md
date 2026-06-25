@@ -2,9 +2,6 @@
 
 This document catalogs recurring mistakes, non-obvious pitfalls, and subtle behaviors encountered when working with this Raft implementation.
 
-See [docs/architecture.md](architecture.md) for the full architecture description.
-See [docs/trade-off.md](trade-off.md) for design trade-off analyses.
-
 ---
 
 ## Forgetting `saveIfChanged`

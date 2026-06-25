@@ -2,9 +2,6 @@
 
 This document describes the high-level architecture of the Raft F# implementation. It assumes familiarity with the [Raft Consensus Algorithm](https://raft.github.io/).
 
-See [docs/gotchas.md](gotchas.md) for common mistakes.
-See [docs/trade-off.md](trade-off.md) for design trade-off analyses.
-
 ---
 
 ## Layer Overview
@@ -13,22 +10,22 @@ The system is organized into four layers:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│                    Application Layer                      │
+│                    Application Layer                     │
 │   RaftNode (Node.fs)   Raft.App (Program.fs)             │
-│   AdminListener (AdminListener.fs)   User callbacks       │
+│   AdminListener (AdminListener.fs)   User callbacks      │
 ├──────────────────────────────────────────────────────────┤
-│                   Agent / Actor Layer                     │
-│   NodeAgent.fs   NodeRaft.fs   NodeLocal.fs               │
-│   NodeTimeout.fs NodeRead.fs   NodeSnapshot.fs             │
-│   NodeApply.fs   NodeBroadcaster.fs  NodePromotion.fs      │
-│   NodeTimer.fs   NodeUtil.fs                              │
+│                   Agent / Actor Layer                    │
+│   NodeAgent.fs   NodeRaft.fs   NodeLocal.fs              │
+│   NodeTimeout.fs NodeRead.fs   NodeSnapshot.fs           │
+│   NodeApply.fs   NodeBroadcaster.fs  NodePromotion.fs    │
+│   NodeTimer.fs   NodeUtil.fs                             │
 ├──────────────────────────────────────────────────────────┤
-│                  Pure Algorithm Layer                      │
-│   Election.fs   Replication.fs   State.fs                 │
-│   Log.fs        ConfigChange.fs                           │
+│                  Pure Algorithm Layer                    │
+│   Election.fs   Replication.fs   State.fs                │
+│   Log.fs        ConfigChange.fs                          │
 ├──────────────────────────────────────────────────────────┤
-│                   I/O / Infrastructure                    │
-│   Transport.fs   Persistence.fs   Serialization.fs        │
+│                   I/O / Infrastructure                   │
+│   Transport.fs   Persistence.fs   Serialization.fs       │
 └──────────────────────────────────────────────────────────┘
 ```
 

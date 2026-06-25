@@ -37,7 +37,7 @@ Each node is configured via `NodeConfig` (defined in `Types.fs`):
 |-------|-------------|
 | `NodeId` | Unique node identifier |
 | `Host` | IP address to bind the transport listener |
-| `Port` | TCP port for inter-node RPC communication (admin listener uses port + 10000) |
+| `Port` | TCP port for inter-node RPC communication |
 | `Peers` | List of peer `PeerInfo` (id, host, port) |
 | `ElectionTimeoutMinMs` / `ElectionTimeoutMaxMs` | Random election timeout range (ms) |
 | `HeartbeatIntervalMs` | Leader heartbeat interval (ms) |
